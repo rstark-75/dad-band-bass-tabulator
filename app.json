@@ -1,20 +1,26 @@
 {
   "expo": {
     "name": "BassTab",
-    "slug": "BassTab",
+    "slug": "basstab",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "scheme": "basstab",
+    "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
+    "description": "BassTab helps musicians build, edit, organise, and perform bass tab arrangements.",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#050816"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rob.basstab",
+      "buildNumber": "1.0.0"
     },
     "android": {
+      "package": "com.rob.basstab",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

@@ -6,16 +6,32 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "export:web": "expo export --platform web",
+    "verify:linux": "npm run typecheck && npm run export:web"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "^3.0.2",
+    "@react-navigation/bottom-tabs": "^7.15.8",
+    "@react-navigation/native": "^7.2.1",
+    "@react-navigation/native-stack": "^7.14.9",
     "expo": "~55.0.8",
     "expo-status-bar": "~55.0.4",
     "react": "19.2.0",
-    "react-native": "0.83.2"
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-draggable-flatlist": "^4.0.3",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-reanimated": "4.2.1",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-web": "^0.21.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "babel-preset-expo": "^55.0.12",
     "typescript": "~5.9.2"
   },
   "private": true
