@@ -720,6 +720,9 @@ function RowEditor({
   const barPadding = isSmallViewport ? 4 : 6;
   const barWidth = cellSize * beatLabels.length + cellGap * (beatLabels.length - 1) + barPadding * 2;
   const footerButtonWidth = Math.floor((barWidth - barPadding * 2 - cellGap) / 2);
+  const barRowGap = 6;
+  const editorTrackWidth =
+    row.bars.length * barWidth + Math.max(0, row.bars.length - 1) * barRowGap;
   const [selectedCell, setSelectedCell] = useState<{
     globalBarIndex: number;
     rowBarIndex: number;
@@ -1021,6 +1024,67 @@ function RowEditor({
             </View>
           ))}
 
+          {useMobileCellEditor && selectedCell ? (
+            <View style={styles.gridRow}>
+              <View style={styles.labelCell} />
+              <View style={[styles.mobileCellEditor, { width: editorTrackWidth }]}>
+                <Text style={styles.mobileCellEditorLabel}>
+                  {`${selectedCell.stringName} • Bar ${selectedCell.globalBarIndex + 1} • Beat ${beatLabels[selectedCell.slotIndex]}`}
+                </Text>
+                <View style={styles.mobileCellEditorRow}>
+                  <TextInput
+                    key={`${selectedCell.globalBarIndex}-${selectedCell.stringName}-${selectedCell.slotIndex}`}
+                    value={mobileCellDraft}
+                    onChangeText={(value) => {
+                      setMobileCellDraft(value);
+                      onCellChange(
+                        selectedCell.globalBarIndex,
+                        selectedCell.stringName,
+                        selectedCell.slotIndex,
+                        value,
+                      );
+                    }}
+                    maxLength={2}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
+                    style={styles.mobileCellEditorInput}
+                    placeholder="-"
+                    placeholderTextColor={palette.textMuted}
+                  />
+                  <PrimaryButton
+                    label="Clear"
+                    onPress={() =>
+                      onCellChange(
+                        selectedCell.globalBarIndex,
+                        selectedCell.stringName,
+                        selectedCell.slotIndex,
+                        '',
+                      )
+                    }
+                    variant="ghost"
+                    size="compact"
+                    style={styles.mobileCellEditorButton}
+                  />
+                  <PrimaryButton
+                    label="Prev"
+                    onPress={() => moveSelectedCell(-1)}
+                    variant="ghost"
+                    size="compact"
+                    style={styles.mobileCellEditorButton}
+                  />
+                  <PrimaryButton
+                    label="Next"
+                    onPress={() => moveSelectedCell(1)}
+                    variant="secondary"
+                    size="compact"
+                    style={styles.mobileCellEditorButton}
+                  />
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.gridRow}>
             <View style={styles.labelCell} />
             {row.bars.map((bar, rowBarIndex) => {
@@ -1118,64 +1182,6 @@ function RowEditor({
           </View>
         </View>
       </ScrollView>
-
-      {useMobileCellEditor && selectedCell ? (
-        <View style={styles.mobileCellEditor}>
-          <Text style={styles.mobileCellEditorLabel}>
-            {`${selectedCell.stringName} • Bar ${selectedCell.globalBarIndex + 1} • Beat ${beatLabels[selectedCell.slotIndex]}`}
-          </Text>
-          <View style={styles.mobileCellEditorRow}>
-            <TextInput
-              key={`${selectedCell.globalBarIndex}-${selectedCell.stringName}-${selectedCell.slotIndex}`}
-              value={mobileCellDraft}
-              onChangeText={(value) => {
-                setMobileCellDraft(value);
-                onCellChange(
-                  selectedCell.globalBarIndex,
-                  selectedCell.stringName,
-                  selectedCell.slotIndex,
-                  value,
-                );
-              }}
-              maxLength={2}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              style={styles.mobileCellEditorInput}
-              placeholder="-"
-              placeholderTextColor={palette.textMuted}
-            />
-            <PrimaryButton
-              label="Clear"
-              onPress={() =>
-                onCellChange(
-                  selectedCell.globalBarIndex,
-                  selectedCell.stringName,
-                  selectedCell.slotIndex,
-                  '',
-                )
-              }
-              variant="ghost"
-              size="compact"
-              style={styles.mobileCellEditorButton}
-            />
-            <PrimaryButton
-              label="Prev"
-              onPress={() => moveSelectedCell(-1)}
-              variant="ghost"
-              size="compact"
-              style={styles.mobileCellEditorButton}
-            />
-            <PrimaryButton
-              label="Next"
-              onPress={() => moveSelectedCell(1)}
-              variant="secondary"
-              size="compact"
-              style={styles.mobileCellEditorButton}
-            />
-          </View>
-        </View>
-      ) : null}
 
       {useSimpleAnnotationFields ? (
         <Field
@@ -1743,13 +1749,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: '#f8fafc',
+    borderColor: palette.primary,
+    backgroundColor: '#ffffff',
   },
   mobileCellEditorLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: palette.textMuted,
+    color: palette.text,
   },
   mobileCellEditorRow: {
     flexDirection: 'row',
@@ -1758,15 +1764,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mobileCellEditorInput: {
-    minHeight: 44,
-    minWidth: 84,
+    minHeight: 48,
+    minWidth: 96,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: palette.border,
+    borderWidth: 2,
+    borderColor: palette.primary,
     backgroundColor: '#ffffff',
     color: palette.text,
     fontFamily: 'monospace',
-    fontSize: 20,
+    fontSize: 22,
     textAlign: 'center',
     paddingHorizontal: 10,
     paddingVertical: 8,

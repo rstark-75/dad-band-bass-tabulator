@@ -97,6 +97,8 @@ export function WelcomeExperience({
           {!isNarrow ? <FlatBassHero compact={!isWide} /> : null}
         </View>
 
+        {isNarrow ? <FlatBassHero compact /> : null}
+
         <View style={[styles.featureGrid, isNarrow && styles.featureGridNarrow]}>
           <FeatureCard
             title="Gig Bag Library"
@@ -287,7 +289,8 @@ const styles = StyleSheet.create({
   },
   flatBassPanelCompact: {
     flex: undefined,
-    minHeight: 220,
+    minHeight: 180,
+    borderRadius: 24,
     marginRight: 0,
   },
   flatBassWrap: {
@@ -298,8 +301,10 @@ const styles = StyleSheet.create({
     paddingRight: 20,
   },
   flatBassWrapCompact: {
-    minHeight: 220,
+    minHeight: 180,
+    paddingLeft: 12,
     paddingRight: 12,
+    alignItems: 'center',
   },
   flatBassGlow: {
     position: 'absolute',
@@ -318,10 +323,11 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '8deg' }],
   },
   flatBassImageCompact: {
-    width: 238,
-    height: 280,
+    width: 220,
+    height: 200,
     marginRight: 0,
-    transform: [{ rotate: '6deg' }],
+    marginTop: 0,
+    transform: [{ rotate: '3deg' }],
   },
   heroBadgeRow: {
     flexDirection: 'row',
