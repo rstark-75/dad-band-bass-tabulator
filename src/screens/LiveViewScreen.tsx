@@ -16,7 +16,14 @@ export function LiveViewScreen({ route }: Props) {
   const { songId } = route.params;
   const { songs } = useBassTab();
   const { width } = useWindowDimensions();
-  const isNarrow = width < 760;
+  const isPhone = width < 760;
+  const isTablet = width >= 760 && width < 1100;
+  const useCompactPreview = width < 960;
+  const horizontalPadding = isPhone ? 12 : 20;
+  const availableCanvasWidth = Math.max(320, width - horizontalPadding * 2);
+  const canvasWidth = isPhone
+    ? Math.max(620, availableCanvasWidth)
+    : Math.min(Math.max(720, availableCanvasWidth), 980);
   const song = songs.find((item) => item.id === songId);
   const chart = useMemo(
     () => (song ? flattenSongRowsToChart(song) : undefined),
@@ -36,10 +43,10 @@ export function LiveViewScreen({ route }: Props) {
         rowAnnotations={chart.rowAnnotations ?? []}
         rowBarCounts={chart.rowBarCounts}
         tone="dark"
-        compact={isNarrow}
+        compact={useCompactPreview}
       />
     );
-  }, [chart, isNarrow]);
+  }, [chart, useCompactPreview]);
 
   if (!song || !chart) {
     return (
@@ -56,31 +63,46 @@ export function LiveViewScreen({ route }: Props) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={[styles.header, isNarrow && styles.headerNarrow]}>
-        <Text style={[styles.songTitle, isNarrow && styles.songTitleNarrow]}>{song.title}</Text>
-        <Text style={[styles.subtitle, isNarrow && styles.subtitleNarrow]}>
+      <View style={[styles.header, isPhone && styles.headerNarrow]}>
+        <Text style={[styles.songTitle, isPhone && styles.songTitleNarrow]}>{song.title}</Text>
+        <Text style={[styles.subtitle, isPhone && styles.subtitleNarrow]}>
           {song.artist} • {song.key} • {song.tuning}
         </Text>
       </View>
 
       <ScrollView
         style={styles.content}
-        contentContainerStyle={[styles.contentContainer, isNarrow && styles.contentContainerNarrow]}
+        contentContainerStyle={[styles.contentContainer, isPhone && styles.contentContainerNarrow]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.pageSheet}>
-          <View style={styles.pageMeta}>
+          <View style={[styles.pageMeta, { width: Math.min(canvasWidth, availableCanvasWidth) }]}>
             <Text style={styles.pageHeading}>Performance Chart</Text>
             <Text style={styles.pageSubheading}>
-              {isNarrow ? 'Scroll sideways for the full chart' : 'Full song, A4 reading layout'}
+              {isPhone
+                ? 'Scroll sideways for the full chart'
+                : isTablet
+                  ? 'Tablet stage view with a wider reading layout'
+                  : 'Full song, A4 reading layout'}
             </Text>
           </View>
           <ScrollView
             horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.canvasScroller}
+            showsHorizontalScrollIndicator={isPhone || isTablet}
+            contentContainerStyle={[
+              styles.canvasScroller,
+              !isPhone && styles.canvasScrollerWide,
+            ]}
           >
-            <View style={[styles.pageCanvas, isNarrow && styles.pageCanvasNarrow]}>{tabPreview}</View>
+            <View
+              style={[
+                styles.pageCanvas,
+                isPhone && styles.pageCanvasNarrow,
+                { width: canvasWidth, maxWidth: canvasWidth },
+              ]}
+            >
+              {tabPreview}
+            </View>
           </ScrollView>
         </View>
       </ScrollView>
@@ -139,8 +161,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   pageMeta: {
-    width: '100%',
-    maxWidth: 720,
+    maxWidth: '100%',
     gap: 4,
   },
   pageHeading: {
@@ -155,8 +176,6 @@ const styles = StyleSheet.create({
     color: palette.liveMuted,
   },
   pageCanvas: {
-    width: '100%',
-    maxWidth: 720,
     borderRadius: 24,
     paddingHorizontal: 24,
     paddingVertical: 28,
@@ -165,14 +184,15 @@ const styles = StyleSheet.create({
     borderColor: '#1f2937',
   },
   pageCanvasNarrow: {
-    width: undefined,
-    minWidth: 620,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 20,
   },
   canvasScroller: {
-    width: '100%',
+    minWidth: '100%',
+  },
+  canvasScrollerWide: {
+    justifyContent: 'center',
   },
   emptyState: {
     flex: 1,

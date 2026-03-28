@@ -58,6 +58,11 @@ export function SongEditorScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.headerActions}>
           <PrimaryButton
+            label="About"
+            onPress={() => navigation.navigate('Welcome')}
+            variant="ghost"
+          />
+          <PrimaryButton
             label="Open Performance View"
             onPress={() => navigation.navigate('PerformanceView', { songId: song.id })}
             variant="secondary"

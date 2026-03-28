@@ -8,7 +8,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Welcome'>;
 export function WelcomeScreen({ navigation }: Props) {
   return (
     <WelcomeExperience
-      actionLabel="Back to Library"
+      actionLabel="Tab Library"
       footerText="Dad Band Bass welcome screen for the free single-setlist version."
       onPrimaryAction={() => navigation.navigate('MainTabs')}
     />

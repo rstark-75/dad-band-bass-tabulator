@@ -39,6 +39,7 @@ interface SectionEditorCardProps {
 }
 
 const beatLabels = ['1', '&', '2', '&', '3', '&', '4', '&'];
+const mobileBeatLabels = ['1', '1&', '2', '2&', '3', '3&', '4', '4&'];
 const barsPerRow = 4;
 const fretOptions = Array.from({ length: 20 }, (_value, index) => String(index));
 
@@ -483,6 +484,43 @@ export function SectionEditorCard({
                           ]}
                         >
                           <PrimaryButton
+                            label="Edit"
+                            onPress={() => setActiveRowIndex(row.rowIndex)}
+                            variant="ghost"
+                            style={[
+                              styles.sidebarButtonWide,
+                              isCompactLayout && styles.sidebarButtonCompact,
+                            ]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Insert Row"
+                            onPress={insertRowAfter}
+                            variant="ghost"
+                            style={[
+                              styles.sidebarButton,
+                              isCompactLayout && styles.sidebarButtonCompact,
+                            ]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Clear Row"
+                            onPress={clearRow}
+                            variant="ghost"
+                            style={[
+                              styles.sidebarButton,
+                              isCompactLayout && styles.sidebarButtonCompact,
+                            ]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Delete"
+                            onPress={deleteRow}
+                            variant="ghost"
+                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
+                            size="compact"
+                          />
+                          <PrimaryButton
                             label="Copy Block"
                             onPress={duplicateRow}
                             variant="ghost"
@@ -510,37 +548,6 @@ export function SectionEditorCard({
                               styles.sidebarButton,
                               isCompactLayout && styles.sidebarButtonCompact,
                               !copiedBlock ? styles.disabled : undefined,
-                            ]}
-                            size="compact"
-                          />
-                          <PrimaryButton
-                            label="Insert Row"
-                            onPress={insertRowAfter}
-                            variant="ghost"
-                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                            size="compact"
-                          />
-                          <PrimaryButton
-                            label="Clear Row"
-                            onPress={clearRow}
-                            variant="ghost"
-                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                            size="compact"
-                          />
-                          <PrimaryButton
-                            label="Delete"
-                            onPress={deleteRow}
-                            variant="ghost"
-                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                            size="compact"
-                          />
-                          <PrimaryButton
-                            label="Edit"
-                            onPress={() => setActiveRowIndex(row.rowIndex)}
-                            variant="ghost"
-                            style={[
-                              styles.sidebarButtonWide,
-                              isCompactLayout && styles.sidebarButtonCompact,
                             ]}
                             size="compact"
                           />
@@ -760,6 +767,16 @@ function RowEditor({
     }));
   }, [activeMobileBarIndex, row.startBarIndex, stringNames, useMobileCellEditor]);
 
+  useEffect(() => {
+    if (!useMobileCellEditor || !selectedCell) {
+      return;
+    }
+
+    if (selectedCell.rowBarIndex !== activeMobileBarIndex) {
+      setActiveMobileBarIndex(selectedCell.rowBarIndex);
+    }
+  }, [activeMobileBarIndex, selectedCell, useMobileCellEditor]);
+
   const clearBar = (barIndex: number) => {
     const nextBars = bars.map((bar, currentBarIndex) => {
       if (currentBarIndex !== barIndex) {
@@ -851,6 +868,7 @@ function RowEditor({
 
   const activeMobileBar = row.bars[activeMobileBarIndex];
   const activeGlobalBarIndex = row.startBarIndex + activeMobileBarIndex;
+  const displayBeatLabels = useMobileCellEditor ? mobileBeatLabels : beatLabels;
   const selectedCellValue =
     selectedCell
       ? row.bars[selectedCell.rowBarIndex]?.cells[selectedCell.stringName]?.[selectedCell.slotIndex] ?? '-'
@@ -1025,7 +1043,7 @@ function RowEditor({
                 <View style={[styles.barBlock, styles.mobileBarBlock, { width: barWidth, padding: barPadding }]}>
                   <Text style={styles.barBlockTitle}>Bar {activeGlobalBarIndex + 1}</Text>
                   <View style={[styles.beatRow, { gap: cellGap }]}>
-                    {beatLabels.map((label) => (
+                    {displayBeatLabels.map((label) => (
                       <View
                         key={`${sectionId}-row-${row.rowIndex}-mobile-beat-${activeMobileBarIndex}-${label}`}
                         style={[styles.beatCell, { width: cellSize }]}
@@ -1084,7 +1102,7 @@ function RowEditor({
             <View style={styles.mobilePadPanel}>
               <View style={styles.mobilePadHeader}>
                 <Text style={styles.mobilePadTitle}>
-                  {`${selectedCell.stringName} string • Bar ${selectedCell.globalBarIndex + 1} • Beat ${beatLabels[selectedCell.slotIndex]}`}
+                  {`${selectedCell.stringName} string • Bar ${selectedCell.globalBarIndex + 1} • Beat ${displayBeatLabels[selectedCell.slotIndex]}`}
                 </Text>
                 <Text style={styles.mobilePadValue}>
                   {selectedCellValue === '-' ? 'Empty' : `Fret ${selectedCellValue}`}
@@ -1932,20 +1950,6 @@ const styles = StyleSheet.create({
   },
   mobileBarActionsBlock: {
     width: '100%',
-  },
-  mobileActionHint: {
-    minHeight: 48,
-    minWidth: 96,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: palette.primary,
-    backgroundColor: '#ffffff',
-    color: palette.text,
-    fontFamily: 'monospace',
-    fontSize: 22,
-    textAlign: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
   },
   barFooter: {
     flexDirection: 'row',
