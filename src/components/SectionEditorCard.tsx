@@ -713,11 +713,48 @@ function RowEditor({
   const [copiedBar, setCopiedBar] = useState<ParsedBar | null>(null);
   const isCompactViewport = width < 900;
   const isSmallViewport = width < 640;
+  const useSimpleAnnotationFields = width < 760;
+  const useMobileCellEditor = width < 760;
   const cellSize = isSmallViewport ? 26 : isCompactViewport ? 28 : 32;
   const cellGap = isSmallViewport ? 3 : 4;
   const barPadding = isSmallViewport ? 4 : 6;
   const barWidth = cellSize * beatLabels.length + cellGap * (beatLabels.length - 1) + barPadding * 2;
   const footerButtonWidth = Math.floor((barWidth - barPadding * 2 - cellGap) / 2);
+  const [selectedCell, setSelectedCell] = useState<{
+    globalBarIndex: number;
+    rowBarIndex: number;
+    stringName: string;
+    stringIndex: number;
+    slotIndex: number;
+  } | null>(null);
+  const [mobileCellDraft, setMobileCellDraft] = useState('');
+
+  useEffect(() => {
+    if (!useMobileCellEditor) {
+      setSelectedCell(null);
+      return;
+    }
+
+    setSelectedCell({
+      globalBarIndex: row.startBarIndex,
+      rowBarIndex: 0,
+      stringName: stringNames[0],
+      stringIndex: 0,
+      slotIndex: 0,
+    });
+  }, [row.rowIndex, row.startBarIndex, stringNames, useMobileCellEditor]);
+
+  useEffect(() => {
+    if (!useMobileCellEditor || !selectedCell) {
+      setMobileCellDraft('');
+      return;
+    }
+
+    const nextValue =
+      row.bars[selectedCell.rowBarIndex]?.cells[selectedCell.stringName]?.[selectedCell.slotIndex] ?? '-';
+
+    setMobileCellDraft(nextValue === '-' ? '' : nextValue);
+  }, [row.bars, selectedCell, useMobileCellEditor]);
 
   const clearBar = (barIndex: number) => {
     const nextBars = bars.map((bar, currentBarIndex) => {
@@ -736,6 +773,18 @@ function RowEditor({
     });
 
     onBarsChange(nextBars);
+  };
+
+  const updateRowBarCount = (value: string) => {
+    const nextCount = Math.max(1, Math.min(8, Number(value.replace(/[^0-9]/g, '')) || 1));
+
+    if (nextCount === row.barCount) {
+      return;
+    }
+
+    const nextRowBarCounts = [...rowBarCounts];
+    nextRowBarCounts[row.rowIndex] = nextCount;
+    onChartChange(bars, undefined, nextRowBarCounts);
   };
 
   const replaceBar = (barIndex: number, nextBar: ParsedBar) => {
@@ -774,6 +823,28 @@ function RowEditor({
     onChartChange(nextBars, undefined, nextRowBarCounts);
   };
 
+  const moveSelectedCell = (direction: -1 | 1) => {
+    if (!selectedCell) {
+      return;
+    }
+
+    const slotsPerRow = row.bars.length * beatLabels.length;
+    const currentIndex = selectedCell.stringIndex * slotsPerRow + selectedCell.rowBarIndex * beatLabels.length + selectedCell.slotIndex;
+    const nextIndex = Math.max(0, Math.min(stringNames.length * slotsPerRow - 1, currentIndex + direction));
+    const nextStringIndex = Math.floor(nextIndex / slotsPerRow);
+    const withinStringIndex = nextIndex % slotsPerRow;
+    const nextRowBarIndex = Math.floor(withinStringIndex / beatLabels.length);
+    const nextSlotIndex = withinStringIndex % beatLabels.length;
+
+    setSelectedCell({
+      globalBarIndex: row.startBarIndex + nextRowBarIndex,
+      rowBarIndex: nextRowBarIndex,
+      stringName: stringNames[nextStringIndex],
+      stringIndex: nextStringIndex,
+      slotIndex: nextSlotIndex,
+    });
+  };
+
   return (
     <View style={styles.activeRowPanel}>
       <View style={styles.activeRowHeader}>
@@ -794,11 +865,38 @@ function RowEditor({
         />
       </View>
 
-      <AnnotationField
-        label="Before Row"
-        value={row.annotation.beforeText}
-        onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'beforeText', value)}
+      <Field
+        label="Block Label"
+        value={row.annotation.label}
+        onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'label', value)}
+        minHeight={46}
       />
+
+      <View style={styles.activeMetaFields}>
+        <View style={styles.activeMetaLabelField}>
+          <RowBarCountField
+            label="Bars"
+            value={row.barCount}
+            onCommit={updateRowBarCount}
+          />
+        </View>
+      </View>
+
+      {useSimpleAnnotationFields ? (
+        <Field
+          label="Before Row"
+          value={row.annotation.beforeText}
+          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'beforeText', value)}
+          multiline
+          minHeight={72}
+        />
+      ) : (
+        <AnnotationField
+          label="Before Row"
+          value={row.annotation.beforeText}
+          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'beforeText', value)}
+        />
+      )}
 
       <ScrollView
         horizontal
@@ -860,30 +958,60 @@ function RowEditor({
                         );
 
                         return (
-                          <TextInput
-                            key={cellKey}
-                            ref={(element) => {
-                              inputRefs.current[cellKey] = element;
-                            }}
-                            value={cellValue === '-' ? '' : cellValue}
-                            onChangeText={(value) =>
-                              onCellChange(globalBarIndex, stringName, slotIndex, value)
-                            }
-                            onKeyPress={(event) =>
-                              onCellKeyPress(
-                                event,
-                                row.rowIndex,
-                                rowBarIndex,
-                                stringIndex,
-                                slotIndex,
-                                cellValue === '-' ? '' : cellValue,
-                              )
-                            }
-                            maxLength={2}
-                            style={[styles.slotInput, { width: cellSize, minHeight: cellSize + 2 }]}
-                            placeholder="-"
-                            placeholderTextColor={palette.textMuted}
-                          />
+                          useMobileCellEditor ? (
+                            <Pressable
+                              key={cellKey}
+                              onPress={() =>
+                                setSelectedCell({
+                                  globalBarIndex,
+                                  rowBarIndex,
+                                  stringName,
+                                  stringIndex,
+                                  slotIndex,
+                                })
+                              }
+                              style={[
+                                styles.slotButton,
+                                { width: cellSize, minHeight: cellSize + 2 },
+                                selectedCell?.globalBarIndex === globalBarIndex &&
+                                selectedCell?.stringName === stringName &&
+                                selectedCell?.slotIndex === slotIndex &&
+                                styles.slotButtonActive,
+                              ]}
+                            >
+                              <Text style={styles.slotButtonLabel}>
+                                {cellValue === '-' ? '-' : cellValue}
+                              </Text>
+                            </Pressable>
+                          ) : (
+                            <TextInput
+                              key={cellKey}
+                              ref={(element) => {
+                                inputRefs.current[cellKey] = element;
+                              }}
+                              value={toEditableCellValue(cellValue)}
+                              onChangeText={(value) =>
+                                onCellChange(globalBarIndex, stringName, slotIndex, value)
+                              }
+                              onKeyPress={(event) =>
+                                onCellKeyPress(
+                                  event,
+                                  row.rowIndex,
+                                  rowBarIndex,
+                                  stringIndex,
+                                  slotIndex,
+                                  toEditableCellValue(cellValue),
+                                )
+                              }
+                              maxLength={2}
+                              autoCapitalize="none"
+                              autoCorrect={false}
+                              spellCheck={false}
+                              style={[styles.slotInput, { width: cellSize, minHeight: cellSize + 2 }]}
+                              placeholder="-"
+                              placeholderTextColor={palette.textMuted}
+                            />
+                          )
                         );
                       })}
                     </View>
@@ -991,11 +1119,79 @@ function RowEditor({
         </View>
       </ScrollView>
 
-      <AnnotationField
-        label="After Row"
-        value={row.annotation.afterText}
-        onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'afterText', value)}
-      />
+      {useMobileCellEditor && selectedCell ? (
+        <View style={styles.mobileCellEditor}>
+          <Text style={styles.mobileCellEditorLabel}>
+            {`${selectedCell.stringName} • Bar ${selectedCell.globalBarIndex + 1} • Beat ${beatLabels[selectedCell.slotIndex]}`}
+          </Text>
+          <View style={styles.mobileCellEditorRow}>
+            <TextInput
+              key={`${selectedCell.globalBarIndex}-${selectedCell.stringName}-${selectedCell.slotIndex}`}
+              value={mobileCellDraft}
+              onChangeText={(value) => {
+                setMobileCellDraft(value);
+                onCellChange(
+                  selectedCell.globalBarIndex,
+                  selectedCell.stringName,
+                  selectedCell.slotIndex,
+                  value,
+                );
+              }}
+              maxLength={2}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              style={styles.mobileCellEditorInput}
+              placeholder="-"
+              placeholderTextColor={palette.textMuted}
+            />
+            <PrimaryButton
+              label="Clear"
+              onPress={() =>
+                onCellChange(
+                  selectedCell.globalBarIndex,
+                  selectedCell.stringName,
+                  selectedCell.slotIndex,
+                  '',
+                )
+              }
+              variant="ghost"
+              size="compact"
+              style={styles.mobileCellEditorButton}
+            />
+            <PrimaryButton
+              label="Prev"
+              onPress={() => moveSelectedCell(-1)}
+              variant="ghost"
+              size="compact"
+              style={styles.mobileCellEditorButton}
+            />
+            <PrimaryButton
+              label="Next"
+              onPress={() => moveSelectedCell(1)}
+              variant="secondary"
+              size="compact"
+              style={styles.mobileCellEditorButton}
+            />
+          </View>
+        </View>
+      ) : null}
+
+      {useSimpleAnnotationFields ? (
+        <Field
+          label="After Row"
+          value={row.annotation.afterText}
+          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'afterText', value)}
+          multiline
+          minHeight={72}
+        />
+      ) : (
+        <AnnotationField
+          label="After Row"
+          value={row.annotation.afterText}
+          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'afterText', value)}
+        />
+      )}
     </View>
   );
 }
@@ -1189,6 +1385,14 @@ const getCellKey = (
   stringIndex: number,
   slotIndex: number,
 ) => `${rowIndex}-${rowBarIndex}-${stringIndex}-${slotIndex}`;
+
+const toEditableCellValue = (value: string) => {
+  if (!value || value === '-') {
+    return '';
+  }
+
+  return value.replace(/-+$/g, '');
+};
 
 const styles = StyleSheet.create({
   card: {
@@ -1436,6 +1640,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
+  activeMetaFields: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  activeMetaLabelField: {
+    width: 88,
+  },
   annotationInput: {
     minHeight: 58,
   },
@@ -1504,6 +1716,63 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 2,
     paddingVertical: 4,
+  },
+  slotButton: {
+    minHeight: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+  },
+  slotButtonActive: {
+    borderColor: palette.accent,
+    backgroundColor: '#fff7ed',
+  },
+  slotButtonLabel: {
+    color: palette.text,
+    fontFamily: 'monospace',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  mobileCellEditor: {
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#f8fafc',
+  },
+  mobileCellEditorLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  mobileCellEditorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  mobileCellEditorInput: {
+    minHeight: 44,
+    minWidth: 84,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#ffffff',
+    color: palette.text,
+    fontFamily: 'monospace',
+    fontSize: 20,
+    textAlign: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  mobileCellEditorButton: {
+    minHeight: 38,
   },
   barFooter: {
     flexDirection: 'row',
