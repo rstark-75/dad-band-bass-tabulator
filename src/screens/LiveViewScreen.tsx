@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -15,6 +15,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'PerformanceView'>;
 export function LiveViewScreen({ route }: Props) {
   const { songId } = route.params;
   const { songs } = useBassTab();
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 760;
   const song = songs.find((item) => item.id === songId);
   const chart = useMemo(
     () => (song ? flattenSongRowsToChart(song) : undefined),
@@ -34,9 +36,10 @@ export function LiveViewScreen({ route }: Props) {
         rowAnnotations={chart.rowAnnotations ?? []}
         rowBarCounts={chart.rowBarCounts}
         tone="dark"
+        compact={isNarrow}
       />
     );
-  }, [chart]);
+  }, [chart, isNarrow]);
 
   if (!song || !chart) {
     return (
@@ -53,24 +56,32 @@ export function LiveViewScreen({ route }: Props) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <Text style={styles.songTitle}>{song.title}</Text>
-        <Text style={styles.subtitle}>
+      <View style={[styles.header, isNarrow && styles.headerNarrow]}>
+        <Text style={[styles.songTitle, isNarrow && styles.songTitleNarrow]}>{song.title}</Text>
+        <Text style={[styles.subtitle, isNarrow && styles.subtitleNarrow]}>
           {song.artist} • {song.key} • {song.tuning}
         </Text>
       </View>
 
       <ScrollView
         style={styles.content}
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[styles.contentContainer, isNarrow && styles.contentContainerNarrow]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.pageSheet}>
           <View style={styles.pageMeta}>
             <Text style={styles.pageHeading}>Performance Chart</Text>
-            <Text style={styles.pageSubheading}>Full song, A4 reading layout</Text>
+            <Text style={styles.pageSubheading}>
+              {isNarrow ? 'Scroll sideways for the full chart' : 'Full song, A4 reading layout'}
+            </Text>
           </View>
-          <View style={styles.pageCanvas}>{tabPreview}</View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.canvasScroller}
+          >
+            <View style={[styles.pageCanvas, isNarrow && styles.pageCanvasNarrow]}>{tabPreview}</View>
+          </ScrollView>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -88,15 +99,28 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     gap: 4,
   },
+  headerNarrow: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
   songTitle: {
     fontSize: 32,
     fontWeight: '800',
     color: palette.liveText,
   },
+  songTitleNarrow: {
+    fontSize: 26,
+    lineHeight: 30,
+  },
   subtitle: {
     fontSize: 16,
     lineHeight: 22,
     color: palette.liveMuted,
+  },
+  subtitleNarrow: {
+    fontSize: 14,
+    lineHeight: 20,
   },
   content: {
     flex: 1,
@@ -104,6 +128,10 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 20,
     paddingBottom: 24,
+  },
+  contentContainerNarrow: {
+    paddingHorizontal: 12,
+    paddingBottom: 18,
   },
   pageSheet: {
     width: '100%',
@@ -135,6 +163,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b1120',
     borderWidth: 1,
     borderColor: '#1f2937',
+  },
+  pageCanvasNarrow: {
+    width: undefined,
+    minWidth: 620,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+  },
+  canvasScroller: {
+    width: '100%',
   },
   emptyState: {
     flex: 1,
