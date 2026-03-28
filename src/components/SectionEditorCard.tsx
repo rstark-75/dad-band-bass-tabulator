@@ -473,94 +473,96 @@ export function SectionEditorCard({
                         )
                       ) : null}
                     </View>
-                    <View style={[styles.rowSidebar, isCompactLayout && styles.rowSidebarCompact]}>
-                      <View
-                        style={[
-                          styles.rowHeaderActions,
-                          isCompactLayout && styles.rowHeaderActionsCompact,
-                        ]}
-                      >
-                        <PrimaryButton
-                          label="Copy Block"
-                          onPress={duplicateRow}
-                          variant="ghost"
-                          style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                          size="compact"
-                        />
-                        <PrimaryButton
-                          label="Paste Before"
-                          onPress={() => pasteBlockAt(row.startBarIndex, row.rowIndex)}
-                          variant="ghost"
+                    {activeRowIndex !== row.rowIndex ? (
+                      <View style={[styles.rowSidebar, isCompactLayout && styles.rowSidebarCompact]}>
+                        <View
                           style={[
-                            styles.sidebarButton,
-                            isCompactLayout && styles.sidebarButtonCompact,
-                            !copiedBlock ? styles.disabled : undefined,
+                            styles.rowHeaderActions,
+                            isCompactLayout && styles.rowHeaderActionsCompact,
                           ]}
-                          size="compact"
-                        />
-                        <PrimaryButton
-                          label="Paste After"
-                          onPress={() =>
-                            pasteBlockAt(row.startBarIndex + row.bars.length, row.rowIndex + 1)
-                          }
-                          variant="ghost"
-                          style={[
-                            styles.sidebarButton,
-                            isCompactLayout && styles.sidebarButtonCompact,
-                            !copiedBlock ? styles.disabled : undefined,
-                          ]}
-                          size="compact"
-                        />
-                        <PrimaryButton
-                          label="Insert Row"
-                          onPress={insertRowAfter}
-                          variant="ghost"
-                          style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                          size="compact"
-                        />
-                        <PrimaryButton
-                          label="Clear Row"
-                          onPress={clearRow}
-                          variant="ghost"
-                          style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                          size="compact"
-                        />
-                        <PrimaryButton
-                          label="Delete"
-                          onPress={deleteRow}
-                          variant="ghost"
-                          style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
-                          size="compact"
-                        />
-                        <PrimaryButton
-                          label="Edit"
-                          onPress={() => setActiveRowIndex(row.rowIndex)}
-                          variant="ghost"
-                          style={[
-                            styles.sidebarButtonWide,
-                            isCompactLayout && styles.sidebarButtonCompact,
-                          ]}
-                          size="compact"
-                        />
-                      </View>
-                      <View style={[styles.rowMetaFields, isCompactLayout && styles.rowMetaFieldsCompact]}>
-                        <View style={styles.rowMetaLabelField}>
-                          <Field
-                            label="Block Label"
-                            value={row.annotation.label}
-                            onChangeText={(value) => updateRowAnnotation(row.rowIndex, 'label', value)}
-                            compact
+                        >
+                          <PrimaryButton
+                            label="Copy Block"
+                            onPress={duplicateRow}
+                            variant="ghost"
+                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Paste Before"
+                            onPress={() => pasteBlockAt(row.startBarIndex, row.rowIndex)}
+                            variant="ghost"
+                            style={[
+                              styles.sidebarButton,
+                              isCompactLayout && styles.sidebarButtonCompact,
+                              !copiedBlock ? styles.disabled : undefined,
+                            ]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Paste After"
+                            onPress={() =>
+                              pasteBlockAt(row.startBarIndex + row.bars.length, row.rowIndex + 1)
+                            }
+                            variant="ghost"
+                            style={[
+                              styles.sidebarButton,
+                              isCompactLayout && styles.sidebarButtonCompact,
+                              !copiedBlock ? styles.disabled : undefined,
+                            ]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Insert Row"
+                            onPress={insertRowAfter}
+                            variant="ghost"
+                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Clear Row"
+                            onPress={clearRow}
+                            variant="ghost"
+                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Delete"
+                            onPress={deleteRow}
+                            variant="ghost"
+                            style={[styles.sidebarButton, isCompactLayout && styles.sidebarButtonCompact]}
+                            size="compact"
+                          />
+                          <PrimaryButton
+                            label="Edit"
+                            onPress={() => setActiveRowIndex(row.rowIndex)}
+                            variant="ghost"
+                            style={[
+                              styles.sidebarButtonWide,
+                              isCompactLayout && styles.sidebarButtonCompact,
+                            ]}
+                            size="compact"
                           />
                         </View>
-                        <View style={styles.rowMetaCountField}>
-                          <RowBarCountField
-                            label="Bars"
-                            value={row.barCount}
-                            onCommit={updateRowBarCount}
-                          />
+                        <View style={[styles.rowMetaFields, isCompactLayout && styles.rowMetaFieldsCompact]}>
+                          <View style={styles.rowMetaLabelField}>
+                            <Field
+                              label="Block Label"
+                              value={row.annotation.label}
+                              onChangeText={(value) => updateRowAnnotation(row.rowIndex, 'label', value)}
+                              compact
+                            />
+                          </View>
+                          <View style={styles.rowMetaCountField}>
+                            <RowBarCountField
+                              label="Bars"
+                              value={row.barCount}
+                              onCommit={updateRowBarCount}
+                            />
+                          </View>
                         </View>
                       </View>
-                    </View>
+                    ) : null}
                   </View>
                   {activeRowIndex === row.rowIndex ? (
                     <RowEditor
@@ -786,7 +788,7 @@ function RowEditor({
           </Text>
         </View>
         <PrimaryButton
-          label="Close"
+          label="Back"
           onPress={() => onSelectRow(-1)}
           variant="secondary"
         />
