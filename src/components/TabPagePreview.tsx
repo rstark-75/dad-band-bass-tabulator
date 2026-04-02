@@ -112,15 +112,20 @@ export function TabPagePreview({ renderMode = 'ascii', ...contentProps }: TabPag
   );
 }
 
-const renderNoteMarker = (stemX: number, fretY: number, accentColor: string) => {
-  const stemTop = fretY - SVG_STEM_HEIGHT;
+const renderStem = (
+  stemX: number,
+  baseY: number,
+  accentColor: string,
+  keyPrefix: string,
+) => {
+  const stemTop = baseY - SVG_STEM_HEIGHT;
 
   return (
     <Line
-      key={`note-marker-${stemX}-${fretY}`}
+      key={`${keyPrefix}-${stemX}-${baseY}`}
       x1={stemX}
       x2={stemX}
-      y1={fretY}
+      y1={baseY}
       y2={stemTop}
       stroke={accentColor}
       strokeWidth={1.4}
@@ -128,6 +133,12 @@ const renderNoteMarker = (stemX: number, fretY: number, accentColor: string) => 
     />
   );
 };
+
+const renderNoteMarker = (stemX: number, fretY: number, accentColor: string) =>
+  renderStem(stemX, fretY, accentColor, 'note-marker');
+
+const renderHoldTail = (stemX: number, circleTopY: number, accentColor: string) =>
+  renderStem(stemX, circleTopY, accentColor, 'hold-tail');
 
 const renderQuaverFlag = (stemX: number, stemTop: number, accentColor: string) => (
   <Path
@@ -232,6 +243,9 @@ const SVG_HOLD2_RADIUS = 9;
 const SVG_CIRCLE_OFFSET = 5;
 const SVG_FLAG_WIDTH = 6;
 const SVG_FLAG_HEIGHT = 8;
+const SVG_STEM_X_OFFSET = 5;
+const SVG_SHORT_BEAT_STEM_LEFT_ADJUST = 3;
+const SVG_SHORT_BEAT_STEM_Y_OFFSET = 10;
 
 function SvgTabPagePreview({
   stringNames,
@@ -353,7 +367,8 @@ function SvgTabPagePreview({
                           barIndex,
                           slotIndex,
                         });
-                        const stemTop = fretY - SVG_STEM_HEIGHT;
+                        const shortBeatStemBaseY = fretY - SVG_SHORT_BEAT_STEM_Y_OFFSET;
+                        const stemTop = shortBeatStemBaseY - SVG_STEM_HEIGHT;
                         const circleCenterY =
                           noteStyle === 'hold4' || noteStyle === 'hold2'
                             ? fretY - SVG_CIRCLE_OFFSET
@@ -364,13 +379,19 @@ function SvgTabPagePreview({
                             : noteStyle === 'hold2'
                               ? SVG_HOLD2_RADIUS
                               : 0;
+                        const circleTopY = circleCenterY - circleRadius;
                         const tailOriginY =
                           noteStyle === 'short'
                             ? stemTop
                             : noteStyle === 'hold2'
-                              ? circleCenterY - circleRadius
+                              ? circleTopY
                               : undefined;
                         const shouldDrawStem = noteStyle === 'short' || noteStyle === 'beat';
+                        const shouldDrawHoldTail = noteStyle === 'hold2';
+                        const stemX =
+                          noteStyle === 'short' || noteStyle === 'beat'
+                            ? fretX + SVG_STEM_X_OFFSET - SVG_SHORT_BEAT_STEM_LEFT_ADJUST
+                            : fretX;
 
                         return (
                           <Fragment key={`svg-fret-${rowIndex}-${barIndex}-${stringName}-${slotIndex}`}>
@@ -385,8 +406,10 @@ function SvgTabPagePreview({
                               {trimmed}
                             </SvgText>
 
-                            {shouldDrawStem && renderNoteMarker(fretX, fretY, accentColor)}
-                            {tailOriginY !== undefined && renderQuaverFlag(fretX, tailOriginY, accentColor)}
+                            {shouldDrawStem && renderNoteMarker(stemX, shortBeatStemBaseY, accentColor)}
+                            {shouldDrawHoldTail && renderHoldTail(fretX, circleTopY, accentColor)}
+                            {tailOriginY !== undefined && noteStyle !== 'hold2' &&
+                              renderQuaverFlag(stemX, tailOriginY, accentColor)}
                             {(noteStyle === 'hold4' || noteStyle === 'hold2') && (
                               <Circle
                                 cx={fretX}

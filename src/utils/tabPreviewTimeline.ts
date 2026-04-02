@@ -17,11 +17,14 @@ const mapEmptyCountToStyle = (emptyCount: number): NoteRenderStyle => {
     return 'beat';
   }
 
-  if (emptyCount === 2) {
-    return 'hold2';
+  // 8 slots = 4 beats in this grid. Empty count is duration-1.
+  // Use circle+stem for anything longer than a beat and shorter than a whole note,
+  // and reserve circle-only for whole note and longer sustains.
+  if (emptyCount >= 7) {
+    return 'hold4';
   }
 
-  return 'hold4';
+  return 'hold2';
 };
 
 const hasNoteAtSlotOnString = (

@@ -25,46 +25,57 @@ const runTest = (name: string, fn: () => void) => {
   }
 };
 
-runTest('consecutive slots are short notes', () => {
-  const rowBars = [makeBar({ G: Array.from({ length: 8 }, () => '7') })];
-  const result = getNoteRenderStyle({
-    rowBars,
-    stringName: 'G',
-    barIndex: 0,
-    slotIndex: 0,
+const expectStyle = (
+  name: string,
+  rowBars: ReturnType<typeof makeBar>[],
+  expected: ReturnType<typeof getNoteRenderStyle>,
+) => {
+  runTest(name, () => {
+    const result = getNoteRenderStyle({
+      rowBars,
+      stringName: 'G',
+      barIndex: 0,
+      slotIndex: 0,
+    });
+
+    console.log(`[debug] ${name}: expected=${expected}, actual=${result}`);
+
+    if (result !== expected) {
+      throw new Error(`Expected ${expected} got ${result}`);
+    }
   });
+};
 
-  if (result !== 'short') {
-    throw new Error(`Expected short got ${result}`);
-  }
-});
+expectStyle(
+  'consecutive slots are short notes',
+  [makeBar({ G: Array.from({ length: 8 }, () => '7') })],
+  'short',
+);
 
-runTest('note followed by one empty is beat', () => {
-  const rowBars = [makeBar({ G: ['7', undefined, '9'] })];
-  const result = getNoteRenderStyle({
-    rowBars,
-    stringName: 'G',
-    barIndex: 0,
-    slotIndex: 0,
-  });
+expectStyle('note followed by one empty is beat', [makeBar({ G: ['7', undefined, '9'] })], 'beat');
 
-  if (result !== 'beat') {
-    throw new Error(`Expected beat got ${result}`);
-  }
-});
+expectStyle(
+  'note with two empty slots becomes hold2',
+  [makeBar({ G: ['7', undefined, undefined, '10'] })],
+  'hold2',
+);
 
-runTest('note with three empty slots becomes hold4', () => {
-  const rowBars = [makeBar({ G: ['7', undefined, undefined, undefined, '10'] })];
-  const result = getNoteRenderStyle({
-    rowBars,
-    stringName: 'G',
-    barIndex: 0,
-    slotIndex: 0,
-  });
+expectStyle(
+  'note with three empty slots (2 beats) becomes hold2',
+  [makeBar({ G: ['7', undefined, undefined, undefined, '10'] })],
+  'hold2',
+);
 
-  if (result !== 'hold4') {
-    throw new Error(`Expected hold4 got ${result}`);
-  }
-});
+expectStyle(
+  'note with seven empty slots (4 beats) becomes hold4',
+  [makeBar({ G: ['7'] }), makeBar({ G: ['10'] })],
+  'hold4',
+);
+
+expectStyle(
+  'note with nine empty slots (>4 beats) becomes hold4',
+  [makeBar({ G: ['7'] }), makeBar({ G: [undefined, undefined, '10'] })],
+  'hold4',
+);
 
 console.log('note render style tests passed');
