@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "export:web": "expo export --platform web",
     "verify:linux": "npm run typecheck && npm run export:web",
-    "test:note-style": "node -r ts-node/register tests/noteRenderStyle.test.ts"
+    "test:note-style": "node -r ts-node/register tests/noteRenderStyle.test.ts",
+    "test:auth": "node -r ts-node/register tests/authFlow.test.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

@@ -12,6 +12,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { SearchBar } from '../components/SearchBar';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
+import { useAuth } from '../features/auth/state/useAuth';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 
@@ -21,6 +22,7 @@ type Props = CompositeScreenProps<
 >;
 
 export function LibraryScreen({ navigation }: Props) {
+  const { authState, logout, loadingAction } = useAuth();
   const {
     songs,
     createSong,
@@ -36,6 +38,7 @@ export function LibraryScreen({ navigation }: Props) {
   const [fileActionMessage, setFileActionMessage] = useState(
     'Pack Away saves your charts here; Bring It Back restores that saved copy.',
   );
+  const signedInEmail = authState.type === 'AUTHENTICATED' ? authState.user.email : null;
 
   const filteredSongs = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -96,6 +99,10 @@ export function LibraryScreen({ navigation }: Props) {
     setFileActionMessage('Song binned.');
   };
 
+  const handleLogout = async () => {
+    await logout();
+  };
+
   return (
     <ScreenContainer>
       <View style={styles.header}>
@@ -104,6 +111,7 @@ export function LibraryScreen({ navigation }: Props) {
           <Text style={styles.subtitle}>
             Keep rehearsal-night staples, pub-set survivors, and last-minute fixes ready to go.
           </Text>
+          {signedInEmail ? <Text style={styles.accountText}>Signed in as {signedInEmail}</Text> : null}
         </View>
         <AppSectionNav
           current="Library"
@@ -115,6 +123,16 @@ export function LibraryScreen({ navigation }: Props) {
           <PrimaryButton label="Pack Away" onPress={handleSaveState} variant="secondary" />
           <PrimaryButton label="Bring It Back" onPress={handleLoadState} variant="ghost" />
           <PrimaryButton label="New Song" onPress={handleCreateSong} />
+          <PrimaryButton
+            label={loadingAction === 'logout' ? 'Signing out...' : 'Sign out'}
+            onPress={() => {
+              if (loadingAction !== 'logout') {
+                void handleLogout();
+              }
+            }}
+            variant="ghost"
+            disabled={loadingAction === 'logout'}
+          />
         </View>
       </View>
 
@@ -190,6 +208,12 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#4b5563',
     lineHeight: 24,
+  },
+  accountText: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.textMuted,
   },
   actionRow: {
     flexDirection: 'row',

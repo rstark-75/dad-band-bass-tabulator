@@ -1,11 +1,16 @@
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { useEffect, useRef } from 'react';
+import { NavigationContainer, DefaultTheme, LinkingOptions } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform } from 'react-native';
 
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
+import { AuthCallbackScreen } from '../features/auth/components/AuthCallbackScreen';
+import { AuthEntryScreen } from '../features/auth/components/AuthEntryScreen';
+import { AuthRestoringScreen } from '../features/auth/components/AuthRestoringScreen';
+import { getAuthRouteMode } from '../features/auth/state/authReducer';
+import { useAuth } from '../features/auth/state/useAuth';
 import { ImportDetailScreen } from '../screens/ImportDetailScreen';
 import { ImportPasteScreen } from '../screens/ImportPasteScreen';
 import { ImportScreen } from '../screens/ImportScreen';
@@ -17,6 +22,7 @@ import { SongExportScreen } from '../screens/SongExportScreen';
 import { SetlistScreen } from '../screens/SetlistScreen';
 import { SongEditorScreen } from '../screens/SongEditorScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
+import { useBassTab } from '../store/BassTabProvider';
 import { RootStackParamList, TabParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -82,11 +88,47 @@ const defaultTheme = {
   },
 };
 
+const webOrigin =
+  typeof globalThis !== 'undefined' &&
+  typeof (globalThis as { location?: { origin?: unknown } }).location?.origin === 'string'
+    ? ((globalThis as { location?: { origin?: string } }).location?.origin ?? '')
+    : '';
+
+const linking: LinkingOptions<RootStackParamList> = {
+  prefixes: [webOrigin, 'basstab://'].filter(Boolean),
+  config: {
+    screens: {
+      AuthEntry: 'auth',
+      AuthCallback: 'auth/callback',
+    },
+  },
+};
+
 export function AppNavigator() {
+  const { authState } = useAuth();
+  const { loadStateFromFile } = useBassTab();
+  const routeMode = getAuthRouteMode(authState);
+  const hydratedUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (authState.type !== 'AUTHENTICATED') {
+      hydratedUserIdRef.current = null;
+      return;
+    }
+
+    if (hydratedUserIdRef.current === authState.user.id) {
+      return;
+    }
+
+    hydratedUserIdRef.current = authState.user.id;
+    void loadStateFromFile().catch((error) => {
+      console.warn('Failed to hydrate song state after auth', error);
+    });
+  }, [authState, loadStateFromFile]);
+
   return (
-    <NavigationContainer theme={defaultTheme}>
+    <NavigationContainer theme={defaultTheme} linking={linking}>
       <Stack.Navigator
-        initialRouteName={Platform.OS === 'web' ? 'Landing' : 'MainTabs'}
         screenOptions={{
           contentStyle: { backgroundColor: palette.background },
           headerShadowVisible: false,
@@ -98,62 +140,88 @@ export function AppNavigator() {
           },
         }}
       >
+        {routeMode === 'restoring' ? (
+          <Stack.Screen
+            name="AuthRestoring"
+            component={AuthRestoringScreen}
+            options={{ headerShown: false }}
+          />
+        ) : null}
+
+        {routeMode === 'auth' ? (
+          <Stack.Screen
+            name="AuthEntry"
+            component={AuthEntryScreen}
+            options={{ headerShown: false }}
+          />
+        ) : null}
+
+        {routeMode === 'app' ? (
+          <>
+            <Stack.Screen
+              name="MainTabs"
+              component={MainTabs}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="Landing"
+              component={LandingScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="Welcome"
+              component={WelcomeScreen}
+              options={{
+                headerShown: false,
+              }}
+            />
+            <Stack.Screen
+              name="SongEditor"
+              component={SongEditorScreen}
+              options={{ title: 'Dad Band Bass Edit Song' }}
+            />
+            <Stack.Screen
+              name="PerformanceView"
+              component={LiveViewScreen}
+              options={{
+                title: 'Dad Band Bass Live View',
+                headerStyle: { backgroundColor: palette.liveBackground },
+                headerTintColor: palette.liveText,
+                headerTitleStyle: {
+                  color: palette.liveText,
+                  fontWeight: '700',
+                  fontFamily: brandDisplayFontFamily,
+                },
+                contentStyle: { backgroundColor: palette.liveBackground },
+              }}
+            />
+            <Stack.Screen
+              name="ExportSong"
+              component={SongExportScreen}
+              options={{ title: 'Dad Band Bass Export Song' }}
+            />
+            <Stack.Screen
+              name="ExportSetlist"
+              component={SetlistExportScreen}
+              options={{ title: 'Dad Band Bass Export Setlist' }}
+            />
+            <Stack.Screen
+              name="ImportDetail"
+              component={ImportDetailScreen}
+              options={{ title: 'Dad Band Bass Import Flow' }}
+            />
+            <Stack.Screen
+              name="ImportPaste"
+              component={ImportPasteScreen}
+              options={{ title: 'Dad Band Bass Paste Tab' }}
+            />
+          </>
+        ) : null}
+
         <Stack.Screen
-          name="Landing"
-          component={LandingScreen}
+          name="AuthCallback"
+          component={AuthCallbackScreen}
           options={{ headerShown: false }}
-        />
-        <Stack.Screen
-          name="Welcome"
-          component={WelcomeScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="MainTabs"
-          component={MainTabs}
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen
-          name="SongEditor"
-          component={SongEditorScreen}
-          options={{ title: 'Dad Band Bass Edit Song' }}
-        />
-        <Stack.Screen
-          name="PerformanceView"
-          component={LiveViewScreen}
-          options={{
-            title: 'Dad Band Bass Live View',
-            headerStyle: { backgroundColor: palette.liveBackground },
-            headerTintColor: palette.liveText,
-            headerTitleStyle: {
-              color: palette.liveText,
-              fontWeight: '700',
-              fontFamily: brandDisplayFontFamily,
-            },
-            contentStyle: { backgroundColor: palette.liveBackground },
-          }}
-        />
-        <Stack.Screen
-          name="ExportSong"
-          component={SongExportScreen}
-          options={{ title: 'Dad Band Bass Export Song' }}
-        />
-        <Stack.Screen
-          name="ExportSetlist"
-          component={SetlistExportScreen}
-          options={{ title: 'Dad Band Bass Export Setlist' }}
-        />
-        <Stack.Screen
-          name="ImportDetail"
-          component={ImportDetailScreen}
-          options={{ title: 'Dad Band Bass Import Flow' }}
-        />
-        <Stack.Screen
-          name="ImportPaste"
-          component={ImportPasteScreen}
-          options={{ title: 'Dad Band Bass Paste Tab' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

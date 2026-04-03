@@ -136,7 +136,10 @@ export class HttpBassTabApi implements BassTabApi {
     console.info(`[BassTab API] ${method} ${url}`);
 
     try {
-      response = await this.fetchImpl(url, init);
+      response = await this.fetchImpl(url, {
+        ...init,
+        credentials: 'include',
+      });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(`BassTab API request failed (${method} ${url}): ${detail}`);

@@ -8,6 +8,7 @@ interface PrimaryButtonProps {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   style?: StyleProp<ViewStyle>;
   size?: 'default' | 'compact';
+  disabled?: boolean;
 }
 
 export function PrimaryButton({
@@ -16,15 +17,18 @@ export function PrimaryButton({
   style,
   variant = 'primary',
   size = 'default',
+  disabled = false,
 }: PrimaryButtonProps) {
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         size === 'compact' && styles.buttonCompact,
         variantStyles[variant],
-        pressed && styles.pressed,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
         style,
       ]}
     >
@@ -65,6 +69,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.85,
+  },
+  disabled: {
+    opacity: 0.5,
   },
 });
 

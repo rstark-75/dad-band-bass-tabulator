@@ -7,6 +7,9 @@ export type TabParamList = {
 };
 
 export type RootStackParamList = {
+  AuthRestoring: undefined;
+  AuthEntry: undefined;
+  AuthCallback: { token?: string } | undefined;
   Landing: undefined;
   Welcome: undefined;
   MainTabs: NavigatorScreenParams<TabParamList> | undefined;
