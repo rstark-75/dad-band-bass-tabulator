@@ -65,6 +65,9 @@ interface BassTabContextValue {
   deleteSong: (songId: string) => void;
   updateSong: (songId: string, updates: Partial<Song>) => void;
   updateSongChart: (songId: string, chart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts'>) => void;
+  addSongToSetlist: (songId: string) => void;
+  removeSongFromSetlist: (songId: string) => void;
+  moveSetlistSong: (songId: string, direction: -1 | 1) => void;
   reorderSetlist: (songIds: string[]) => void;
   saveStateToFile: () => Promise<string>;
   loadStateFromFile: () => Promise<string>;
@@ -477,11 +480,22 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       });
   };
 
-  const reorderSetlist = (songIds: string[]) => {
+  const syncSetlistOrder = (songIds: string[], action: string) => {
+    const availableSongIds = new Set(songs.map((song) => song.id));
+    const uniqueSongIds: string[] = [];
+
+    for (const songId of songIds) {
+      if (!availableSongIds.has(songId) || uniqueSongIds.includes(songId)) {
+        continue;
+      }
+
+      uniqueSongIds.push(songId);
+    }
+
     setSetlist((current) => ({
       ...current,
       name: FREE_SETLIST_TITLE,
-      songIds,
+      songIds: uniqueSongIds,
       updatedAt: new Date().toISOString(),
     }));
 
@@ -490,13 +504,51 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     }
 
     void backendApi
-      .replacePlaylistOrder({ songIds })
+      .replacePlaylistOrder({ songIds: uniqueSongIds })
       .then((playlistDto) => {
         setSetlist(normalizeSetlist(fromPlaylistDto(playlistDto)));
       })
       .catch((error) => {
-        console.warn('BassTab backend reorderSetlist failed', error);
+        console.warn(`BassTab backend ${action} failed`, error);
       });
+  };
+
+  const reorderSetlist = (songIds: string[]) => {
+    syncSetlistOrder(songIds, 'reorderSetlist');
+  };
+
+  const addSongToSetlist = (songId: string) => {
+    if (setlist.songIds.includes(songId)) {
+      return;
+    }
+
+    syncSetlistOrder([...setlist.songIds, songId], 'addSongToSetlist');
+  };
+
+  const removeSongFromSetlist = (songId: string) => {
+    if (!setlist.songIds.includes(songId)) {
+      return;
+    }
+
+    syncSetlistOrder(
+      setlist.songIds.filter((existingSongId) => existingSongId !== songId),
+      'removeSongFromSetlist',
+    );
+  };
+
+  const moveSetlistSong = (songId: string, direction: -1 | 1) => {
+    const currentIndex = setlist.songIds.findIndex((existingSongId) => existingSongId === songId);
+    const nextIndex = currentIndex + direction;
+
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= setlist.songIds.length) {
+      return;
+    }
+
+    const nextSongIds = [...setlist.songIds];
+    const [movedSongId] = nextSongIds.splice(currentIndex, 1);
+    nextSongIds.splice(nextIndex, 0, movedSongId);
+
+    syncSetlistOrder(nextSongIds, 'moveSetlistSong');
   };
 
   const saveStateToFile = async () => {
@@ -590,6 +642,9 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       deleteSong,
       updateSong,
       updateSongChart,
+      addSongToSetlist,
+      removeSongFromSetlist,
+      moveSetlistSong,
       reorderSetlist,
       saveStateToFile,
       loadStateFromFile,

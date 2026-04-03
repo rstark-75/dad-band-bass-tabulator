@@ -21,7 +21,7 @@ type Props = CompositeScreenProps<
 >;
 
 export function SetlistScreen({ navigation }: Props) {
-  const { songs, setlist, reorderSetlist } = useBassTab();
+  const { songs, setlist, addSongToSetlist, removeSongFromSetlist, moveSetlistSong } = useBassTab();
 
   const orderedSongs = useMemo(
     () =>
@@ -37,25 +37,15 @@ export function SetlistScreen({ navigation }: Props) {
   );
 
   const moveSong = (songId: string, direction: -1 | 1) => {
-    const index = setlist.songIds.findIndex((id) => id === songId);
-    const nextIndex = index + direction;
-
-    if (index < 0 || nextIndex < 0 || nextIndex >= setlist.songIds.length) {
-      return;
-    }
-
-    const nextSongIds = [...setlist.songIds];
-    const [movedSongId] = nextSongIds.splice(index, 1);
-    nextSongIds.splice(nextIndex, 0, movedSongId);
-    reorderSetlist(nextSongIds);
+    moveSetlistSong(songId, direction);
   };
 
   const removeSong = (songId: string) => {
-    reorderSetlist(setlist.songIds.filter((id) => id !== songId));
+    removeSongFromSetlist(songId);
   };
 
   const addSong = (songId: string) => {
-    reorderSetlist([...setlist.songIds, songId]);
+    addSongToSetlist(songId);
   };
 
   return (
