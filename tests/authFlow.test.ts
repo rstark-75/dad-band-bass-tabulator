@@ -38,7 +38,7 @@ const run = async () => {
     const harness = createHarness({
       getSession: async () => ({
         authenticated: true as const,
-        user: { id: 'usr_1', email: 'rob@example.com', displayName: 'Rob' },
+        user: { id: 'usr_1', userId: 'rob', email: 'rob@example.com', displayName: 'Rob' },
       }),
     });
 
@@ -72,7 +72,11 @@ const run = async () => {
       }),
     });
 
-    await harness.actions.startAuth(' Rob@Example.com ');
+    await harness.actions.startAuth({
+      rawUserId: 'rob',
+      rawEmail: ' Rob@Example.com ',
+      intent: 'LOGIN',
+    });
 
     const state = harness.getState().authState;
 
@@ -80,8 +84,12 @@ const run = async () => {
       throw new Error('Expected CHECK_EMAIL state after startAuth.');
     }
 
-    if (state.email !== 'Rob@Example.com') {
+    if (state.email !== 'rob@example.com') {
       throw new Error(`Expected normalized email, got ${state.email}`);
+    }
+
+    if (state.userId !== 'rob') {
+      throw new Error(`Expected normalized userId, got ${state.userId}`);
     }
   });
 
@@ -97,7 +105,11 @@ const run = async () => {
     const harness = createHarness({
       verifyLink: async () => ({
         status: 'AUTHENTICATED' as const,
-        user: { id: 'usr_2', email: 'anne@example.com', displayName: 'Anne' },
+        user: { id: 'usr_2', userId: 'anne', email: 'anne@example.com', displayName: 'Anne' },
+      }),
+      getSession: async () => ({
+        authenticated: true as const,
+        user: { id: 'usr_2', userId: 'anne', email: 'anne@example.com', displayName: 'Anne' },
       }),
     });
 
@@ -115,11 +127,20 @@ const run = async () => {
       },
       getSession: async () => ({
         authenticated: true as const,
-        user: { id: 'usr_session', email: 'session@example.com', displayName: 'Session User' },
+        user: {
+          id: 'usr_session',
+          userId: 'session_user',
+          email: 'session@example.com',
+          displayName: 'Session User',
+        },
       }),
     });
 
-    await harness.actions.verifyCode('session@example.com', '123456');
+    await harness.actions.verifyCode({
+      rawUserId: 'session_user',
+      rawEmail: 'session@example.com',
+      rawCode: '123456',
+    });
 
     const state = harness.getState().authState;
 
@@ -133,7 +154,7 @@ const run = async () => {
     const unauthenticated = getAuthRouteMode({ type: 'UNAUTHENTICATED' });
     const authenticated = getAuthRouteMode({
       type: 'AUTHENTICATED',
-      user: { id: 'u', email: 'a@b.com', displayName: 'A' },
+      user: { id: 'u', userId: 'a', email: 'a@b.com', displayName: 'A' },
     });
 
     if (restoring !== 'restoring' || unauthenticated !== 'auth' || authenticated !== 'app') {
@@ -145,7 +166,11 @@ const run = async () => {
     const harness = createHarness({
       verifyLink: async () => ({
         status: 'AUTHENTICATED' as const,
-        user: { id: 'usr_3', email: 'rob@example.com', displayName: 'Rob' },
+        user: { id: 'usr_3', userId: 'rob', email: 'rob@example.com', displayName: 'Rob' },
+      }),
+      getSession: async () => ({
+        authenticated: true as const,
+        user: { id: 'usr_3', userId: 'rob', email: 'rob@example.com', displayName: 'Rob' },
       }),
       logout: async () => {
         throw new Error('network');

@@ -1,18 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+} from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { CompositeScreenProps } from '@react-navigation/native';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import { BassTabApiError, createBassTabApiFromEnv } from '../api';
+import { BassTabApiError, CommunitySongCardDto, createBassTabApiFromEnv } from '../api';
 import { AppSectionNav } from '../components/AppSectionNav';
 import { EmptyState } from '../components/EmptyState';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { TabPagePreview } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
-import { communitySongs } from '../data/communitySongs';
 import {
   FREE_PLAN_LIMITS,
   resolveUpgradeTrigger,
@@ -21,7 +30,9 @@ import {
 } from '../features/subscription';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
-import { createId } from '../utils/ids';
+import { CommunitySongAuthor, CommunitySongCard, SongChart } from '../types/models';
+import { SongListItem } from '../components/SongListItem';
+import { flattenSongRowsToChart } from '../utils/songChart';
 import { parseTab } from '../utils/tabLayout';
 
 type Props = CompositeScreenProps<
@@ -29,139 +40,340 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
-interface CommunitySongListItem {
-  id: string;
+type CommunitySongListItem = CommunitySongCard;
+
+interface CommunityPreviewData {
   title: string;
   artist: string;
   key: string;
   tuning: string;
-  feelNote: string;
-  tab?: string;
-  source: 'backend' | 'seed';
+  author?: CommunitySongAuthor;
+  stringNames: string[];
+  bars: ReturnType<typeof parseTab>['bars'];
+  rowAnnotations: SongChart['rowAnnotations'];
+  rowBarCounts: number[];
 }
 
-const storageKeys = {
-  savedCommunitySongIds: 'basstab:community-saved-song-ids',
-};
+function resolveCommunitySaveId(song: CommunitySongCard) {
+  return song.sourceSongId ?? song.id;
+}
+
+function resolveCommunityDetailId(song: CommunitySongCard) {
+  return song.publishedSongId ?? song.id;
+}
+
+function resolveCommunityVoteId(song: CommunitySongCard) {
+  return song.sourceSongId ?? song.id;
+}
+
+function formatPublishedDateLabel(isoDate: string | null | undefined): string {
+  if (!isoDate) {
+    return 'Just added';
+  }
+
+  const parsed = new Date(isoDate);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Just added';
+  }
+
+  return `Added ${new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(parsed)}`;
+}
+
+function getCommunitySongPopularityScore(song: CommunitySongListItem): number {
+  return (song.votes.upVotes ?? 0) - (song.votes.downVotes ?? 0);
+}
+
+function sortCommunitySongs(songs: CommunitySongListItem[]): CommunitySongListItem[] {
+  return [...songs].sort((a, b) => {
+    const score = getCommunitySongPopularityScore(b) - getCommunitySongPopularityScore(a);
+    if (score !== 0) {
+      return score;
+    }
+
+    if (b.votes.upVotes !== a.votes.upVotes) {
+      return b.votes.upVotes - a.votes.upVotes;
+    }
+
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function toCommunitySongListItem(song: CommunitySongCardDto): CommunitySongListItem {
+  return {
+    id: song.id,
+    publishedSongId: song.publishedSongId ?? song.id ?? null,
+    sourceSongId: song.sourceSongId ?? song.id ?? null,
+    title: song.title,
+    artist: song.artist,
+    key: song.key ?? 'E',
+    tuning: song.tuning ?? 'EADG',
+    feelNote: song.feelNote ?? 'Community chart',
+    author: song.author
+      ? {
+        userId: song.author.userId,
+        displayName: song.author.displayName ?? null,
+        avatarUrl: song.author.avatarUrl ?? null,
+      }
+      : undefined,
+    votes: {
+      upVotes: song.votes.upVotes,
+      downVotes: song.votes.downVotes,
+      currentUserVote: song.votes.currentUserVote,
+    },
+    publishedAt: song.publishedAt,
+    updatedAt: song.updatedAt,
+  };
+}
+
+interface AuthorChipProps {
+  author?: CommunitySongAuthor;
+  fallbackName?: string | null;
+  style?: StyleProp<ViewStyle>;
+}
+
+function AuthorChip({ author, fallbackName, style }: AuthorChipProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  if (!author && !fallbackName?.trim()) {
+    return null;
+  }
+
+  const handle = author?.userId?.trim();
+  const displayHandle = handle ? `@${handle}` : null;
+  const displayName = author?.displayName?.trim() || fallbackName?.trim() || displayHandle || 'Community';
+  const avatarUri = author?.avatarUrl?.trim() ?? '';
+  const showAvatarImage =
+    !imageFailed &&
+    (avatarUri.startsWith('http://') || avatarUri.startsWith('https://'));
+  const fallbackInitial = displayName.slice(0, 1).toUpperCase() || 'A';
+  const authorLine =
+    displayHandle
+      ? `contributed by ${displayName === displayHandle ? displayHandle : `${displayName} (${displayHandle})`}`
+      : `contributed by ${displayName}`;
+
+  return (
+    <View style={[styles.authorRow, style]}>
+      <View style={styles.authorAvatar}>
+        {showAvatarImage ? (
+          <Image
+            source={{ uri: avatarUri }}
+            style={styles.authorAvatarImage}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <Text style={styles.authorAvatarFallback}>{fallbackInitial}</Text>
+        )}
+      </View>
+      <Text style={styles.authorText} numberOfLines={1}>
+        {authorLine}
+      </Text>
+    </View>
+  );
+}
 
 const isCommunityAlreadySavedError = (error: unknown): boolean => {
   if (error instanceof BassTabApiError) {
     const code = error.code?.toUpperCase();
 
-    if (code === 'COMMUNITY_ALREADY_SAVED' || code === 'COMMUNITY_SONG_ALREADY_SAVED') {
+    if (
+      code === 'COMMUNITY_ALREADY_SAVED' ||
+      code === 'COMMUNITY_SONG_ALREADY_SAVED' ||
+      code === 'COMMUNITY_SAVE_ALREADY_EXISTS'
+    ) {
       return true;
     }
 
-    if (error.status === 400 && /already saved/i.test(error.message)) {
+    if (error.status === 400 && /already (saved|exists)/i.test(error.message)) {
       return true;
     }
   }
 
   if (error instanceof Error) {
-    return /already saved/i.test(error.message);
+    return /already (saved|exists)/i.test(error.message);
   }
 
   return false;
 };
 
 export function ImportScreen({ navigation }: Props) {
-  const { tier, capabilities } = useSubscription();
+  const {
+    tier,
+    capabilities,
+    communitySongsSaved,
+    refresh,
+    setCommunitySongsSaved,
+    capabilityDefaults,
+  } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
-  const { songs, createSong, updateSong } = useBassTab();
+  const { songs, importSongFromDto } = useBassTab();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
-  const [communityCatalog, setCommunityCatalog] = useState<CommunitySongListItem[]>(
-    communitySongs.map((song) => ({
-      id: song.id,
-      title: song.title,
-      artist: song.artist,
-      key: song.key,
-      tuning: song.tuning,
-      feelNote: 'Community chart',
-      tab: song.tab,
-      source: 'seed',
-    })),
-  );
+  const [communityCatalog, setCommunityCatalog] = useState<CommunitySongListItem[]>([]);
   const [savedCommunitySongIds, setSavedCommunitySongIds] = useState<string[]>([]);
   const [savingSongId, setSavingSongId] = useState<string | null>(null);
-  const [loadingCatalog, setLoadingCatalog] = useState(Boolean(backendApi));
+  const [previewLoadingSongId, setPreviewLoadingSongId] = useState<string | null>(null);
+  const [votingSongId, setVotingSongId] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<CommunityPreviewData | null>(null);
+  const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [statusMessage, setStatusMessage] = useState('Browse community charts and save the ones you want to play.');
 
-  useEffect(() => {
-    let isMounted = true;
+  const hydrateCommunity = useCallback(async () => {
+    if (!backendApi) {
+      setCommunityCatalog([]);
+      setSavedCommunitySongIds([]);
+      setStatusMessage('Community requires backend API configuration.');
+      setLoadingCatalog(false);
+      return;
+    }
 
-    const hydrateCommunity = async () => {
-      try {
-        if (backendApi) {
-          setLoadingCatalog(true);
-          const [savedSongs, releasedSongs] = await Promise.all([
-            backendApi.listSavedCommunitySongs(),
-            backendApi.listCommunitySongs(),
-          ]);
+    try {
+      setLoadingCatalog(true);
+      const [savedSongs, releasedSongs] = await Promise.all([
+        backendApi.listSavedCommunitySongs(),
+        backendApi.listCommunitySongs(),
+      ]);
 
-          if (isMounted) {
-            setSavedCommunitySongIds(savedSongs.map((item) => item.communitySongId));
-            setCommunityCatalog(
-              releasedSongs.map((song) => ({
-                id: song.id,
-                title: song.title,
-                artist: song.artist,
-                key: song.key,
-                tuning: song.tuning,
-                feelNote: song.feelNote,
-                source: 'backend',
-              })),
-            );
-            if (releasedSongs.length === 0) {
-              setStatusMessage('No community charts have been released yet.');
-            }
-            setLoadingCatalog(false);
-          }
-
-          return;
+      const sortedSongs = sortCommunitySongs(releasedSongs.map(toCommunitySongListItem));
+      const savedIdSet = new Set<string>(savedSongs.map((item) => item.publishedSongId));
+      sortedSongs.forEach((song) => {
+        const publishedId = song.publishedSongId ?? song.id;
+        if (savedIdSet.has(publishedId)) {
+          savedIdSet.add(resolveCommunitySaveId(song));
         }
-
-        const stored = await AsyncStorage.getItem(storageKeys.savedCommunitySongIds);
-        const parsed = stored ? (JSON.parse(stored) as unknown) : [];
-
-        if (!isMounted) {
-          return;
-        }
-
-        if (Array.isArray(parsed)) {
-          setSavedCommunitySongIds(parsed.filter((item): item is string => typeof item === 'string'));
-        }
-      } catch (error) {
-        console.warn('Community song save hydrate failed', error);
-        if (isMounted) {
-          setLoadingCatalog(false);
-        }
+      });
+      setSavedCommunitySongIds(Array.from(savedIdSet));
+      console.info('Community saved songs snapshot', {
+        savedCount: savedSongs.length,
+        reportedSaved: savedSongs[0]?.communitySongsSaved ?? 0,
+      });
+      setCommunityCatalog(sortedSongs);
+      if (releasedSongs.length === 0) {
+        setStatusMessage('No community charts have been released yet.');
       }
-    };
-
-    void hydrateCommunity();
-
-    return () => {
-      isMounted = false;
-    };
+      await refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load community charts.';
+      setStatusMessage(message);
+      console.warn('Community song hydrate failed', error);
+    } finally {
+      setLoadingCatalog(false);
+    }
   }, [backendApi]);
 
-  const handleSaveCommunitySong = async (communitySongId: string) => {
-    const selectedSong = communityCatalog.find((song) => song.id === communitySongId);
+  useEffect(() => {
+    void hydrateCommunity();
+  }, [hydrateCommunity]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void hydrateCommunity();
+      return undefined;
+    }, [hydrateCommunity]),
+  );
+
+  const fallbackFreeCapabilities = capabilityDefaults?.free ?? {
+    maxCommunitySongs: FREE_PLAN_LIMITS.communitySaves,
+    maxCommunitySaves: FREE_PLAN_LIMITS.communitySaves,
+    maxSongs: FREE_PLAN_LIMITS.songs,
+    maxSetlists: FREE_PLAN_LIMITS.setlists,
+    svgEnabled: false,
+  };
+  const planCommunitySaveLimit =
+    capabilities.maxCommunitySaves ??
+    capabilities.maxCommunitySongs ??
+    fallbackFreeCapabilities.maxCommunitySaves ??
+    fallbackFreeCapabilities.maxCommunitySongs ??
+    (tier === 'FREE' ? FREE_PLAN_LIMITS.communitySaves : null);
+  const hasCommunityLimit = typeof planCommunitySaveLimit === 'number' && planCommunitySaveLimit >= 0;
+  const freeSaveSlotsLeft = hasCommunityLimit
+    ? Math.max(0, planCommunitySaveLimit - communitySongsSaved)
+    : 0;
+
+  const handleOpenPreview = async (song: CommunitySongListItem) => {
+    if (previewLoadingSongId || savingSongId) {
+      return;
+    }
+
+    if (!backendApi) {
+      setStatusMessage('Community requires backend API configuration.');
+      return;
+    }
+
+    setPreviewLoadingSongId(song.id);
+
+    try {
+      const communitySong = await backendApi.getCommunitySong(resolveCommunityDetailId(song));
+      const flattened = flattenSongRowsToChart({
+        stringNames: communitySong.chart.stringNames,
+        rows: communitySong.chart.rows,
+      });
+      const parsed = parseTab(flattened.tab);
+
+      setPreviewData({
+        title: communitySong.title,
+        artist: communitySong.artist,
+        key: communitySong.key ?? 'E',
+        tuning: communitySong.tuning ?? 'EADG',
+        author: communitySong.author
+          ? {
+            userId: communitySong.author.userId,
+            displayName: communitySong.author.displayName ?? null,
+            avatarUrl: communitySong.author.avatarUrl ?? null,
+          }
+          : undefined,
+        stringNames:
+          parsed.stringNames.length > 0 ? parsed.stringNames : communitySong.chart.stringNames,
+        bars: parsed.bars,
+        rowAnnotations: flattened.rowAnnotations,
+        rowBarCounts: flattened.rowBarCounts,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load preview.';
+      setStatusMessage(message);
+    } finally {
+      setPreviewLoadingSongId(null);
+    }
+  };
+
+  const handleSaveCommunitySong = async (communityEntryId: string) => {
+    if (!backendApi) {
+      setStatusMessage('Community requires backend API configuration.');
+      return;
+    }
+
+    const selectedSong = communityCatalog.find((song) => song.id === communityEntryId);
 
     if (!selectedSong || savingSongId) {
       return;
     }
 
-    const hasCommunitySave = savedCommunitySongIds.includes(selectedSong.id);
-    const maxCommunitySaves = capabilities.maxCommunitySongs ?? FREE_PLAN_LIMITS.communitySaves;
-    const maxSongs = capabilities.maxSongs ?? FREE_PLAN_LIMITS.songs;
+    const saveId = resolveCommunitySaveId(selectedSong);
+    const hasCommunitySave = savedCommunitySongIds.includes(saveId);
+    const maxSongs =
+      capabilities.maxSongs ?? fallbackFreeCapabilities.maxSongs ?? FREE_PLAN_LIMITS.songs;
 
     if (tier === 'FREE' && songs.length >= maxSongs) {
       showUpgradePrompt('SONG_LIMIT');
       return;
     }
 
-    if (tier === 'FREE' && !hasCommunitySave && savedCommunitySongIds.length >= maxCommunitySaves) {
+    console.info('Community save attempt', {
+      song: selectedSong.title,
+      hasCommunitySave,
+      planCommunitySaveLimit,
+      communitySongsSaved,
+      hasCommunityLimit,
+    });
+
+    if (!hasCommunitySave && hasCommunityLimit && communitySongsSaved >= planCommunitySaveLimit) {
+      console.warn(
+        'Community save blocked',
+        { communitySongsSaved, planCommunitySaveLimit, hasCommunitySave, song: selectedSong.title },
+      );
       showUpgradePrompt('COMMUNITY_SAVE');
       return;
     }
@@ -169,88 +381,110 @@ export function ImportScreen({ navigation }: Props) {
     setSavingSongId(selectedSong.id);
 
     try {
-      let chartStringNames: string[] = [];
-      let chartBars = [] as ReturnType<typeof parseTab>['bars'];
+      let songForSave = selectedSong;
 
-      let newlySavedToCommunity = false;
+      if (!hasCommunitySave) {
+        try {
+          const communitySongId = resolveCommunitySaveId(songForSave);
+          console.log('saveCommunity payload', {
+            communitySongId,
+            song: songForSave,
+          });
+          const savedResponse = await backendApi.saveCommunitySong({ communitySongId });
+          console.info(
+            'Saved community song response',
+            savedResponse,
+            { hasCommunitySave, communitySongsSaved, next: savedResponse.communitySongsSaved },
+          );
+          setCommunitySongsSaved(savedResponse.communitySongsSaved);
+        } catch (error) {
+          const trigger = resolveUpgradeTrigger(error);
 
-      if (backendApi) {
-        if (!hasCommunitySave) {
-          try {
-            await backendApi.saveCommunitySong({ communitySongId: selectedSong.id });
-            newlySavedToCommunity = true;
-          } catch (error) {
-            if (!isCommunityAlreadySavedError(error)) {
-              throw error;
+          if (trigger) {
+            showUpgradePrompt(trigger);
+            return;
+          }
+
+          if (error instanceof BassTabApiError && error.code === 'COMMUNITY_LIMIT') {
+            showUpgradePrompt('COMMUNITY_SAVE');
+            return;
+          }
+
+          const lowerMessage = error instanceof Error ? error.message.toLowerCase() : '';
+
+          if (lowerMessage.includes('is required')) {
+            setStatusMessage('Save failed: communitySongId is required.');
+            return;
+          }
+
+          if (
+            error instanceof BassTabApiError &&
+            error.status === 400 &&
+            lowerMessage.includes('not available in community catalog')
+          ) {
+            const refreshedSongs = sortCommunitySongs((await backendApi.listCommunitySongs()).map(toCommunitySongListItem));
+            setCommunityCatalog(refreshedSongs);
+
+            const refreshedMatch = refreshedSongs.find((song) =>
+              song.id === songForSave.id ||
+              resolveCommunitySaveId(song) === resolveCommunitySaveId(songForSave) ||
+              resolveCommunityDetailId(song) === resolveCommunityDetailId(songForSave),
+            );
+
+            if (!refreshedMatch) {
+              setStatusMessage('Community list changed. Pull to refresh and try again.');
+              return;
             }
+
+            songForSave = refreshedMatch;
+            const retryCommunitySongId = resolveCommunitySaveId(songForSave);
+            console.log('saveCommunity payload', {
+              communitySongId: retryCommunitySongId,
+              song: songForSave,
+            });
+            await backendApi.saveCommunitySong({ communitySongId: retryCommunitySongId });
+          } else if (!isCommunityAlreadySavedError(error)) {
+            throw error;
           }
         }
+      }
 
-        const releasedSong = await backendApi.getCommunitySong(selectedSong.id);
-        const createdSong = await createSong({
-          title: releasedSong.title,
-          artist: releasedSong.artist,
-          key: releasedSong.key,
-          feelNote: releasedSong.feelNote,
-          tuning: releasedSong.tuning,
-        });
+      const importTargetId = resolveCommunityDetailId(songForSave);
+      const { song: importedSongDto, status: importStatus } =
+        await backendApi.importCommunitySong(importTargetId);
 
-        updateSong(createdSong.id, {
-          stringNames: releasedSong.chart.stringNames,
-          rows: releasedSong.chart.rows,
-          releasedToCommunity: false,
-          communityReleasedAt: null,
-        });
+      const importedSong = importSongFromDto(importedSongDto);
 
-        if (!newlySavedToCommunity && hasCommunitySave) {
-          setStatusMessage(`Added "${selectedSong.title}" to your library.`);
+      const nextSaveId = resolveCommunitySaveId(songForSave);
+      setSavedCommunitySongIds((prevIds) => {
+        const nextSavedSet = new Set(prevIds);
+        nextSavedSet.add(nextSaveId);
+        if (songForSave.publishedSongId) {
+          nextSavedSet.add(songForSave.publishedSongId);
         }
-      } else {
-        const parsed = parseTab(selectedSong.tab ?? '');
-        chartStringNames = parsed.stringNames;
-        chartBars = parsed.bars;
+        return Array.from(nextSavedSet);
+      });
+      const importedMessage =
+        importStatus === 200
+          ? `Already imported "${importedSong.title}"—your existing copy is unchanged.`
+          : `Moved "${importedSong.title}" to your library.`;
+      setStatusMessage(importedMessage);
 
-        const createdSong = await createSong({
-          title: selectedSong.title,
-          artist: selectedSong.artist,
-          key: selectedSong.key,
-          tuning: selectedSong.tuning,
-        });
-
-        updateSong(createdSong.id, {
-          key: selectedSong.key,
-          tuning: selectedSong.tuning,
-          stringNames: chartStringNames,
-          rows: [
-            {
-              id: createId('row'),
-              label: 'Community Row',
-              beforeText: '',
-              afterText: '',
-              bars: chartBars,
-            },
-          ],
-        });
-      }
-
-      const nextSavedIds = savedCommunitySongIds.includes(selectedSong.id)
-        ? savedCommunitySongIds
-        : [selectedSong.id, ...savedCommunitySongIds];
-      setSavedCommunitySongIds(nextSavedIds);
-      if (nextSavedIds !== savedCommunitySongIds) {
-        setStatusMessage(`Saved "${selectedSong.title}" to your library.`);
-      } else {
-        setStatusMessage(`Added "${selectedSong.title}" to your library.`);
-      }
-
-      if (!backendApi) {
-        await AsyncStorage.setItem(storageKeys.savedCommunitySongIds, JSON.stringify(nextSavedIds));
+      try {
+        await refresh();
+      } catch (refreshError) {
+        console.warn('Subscription refresh failed after community save', refreshError);
       }
     } catch (error) {
       const trigger = resolveUpgradeTrigger(error);
 
       if (trigger) {
         showUpgradePrompt(trigger);
+        return;
+      }
+
+      if (error instanceof BassTabApiError && error.code === 'COMMUNITY_LIMIT') {
+        showUpgradePrompt('COMMUNITY_SAVE');
         return;
       }
 
@@ -261,10 +495,49 @@ export function ImportScreen({ navigation }: Props) {
     }
   };
 
-  const freeSaveSlotsLeft = useMemo(
-    () => Math.max(0, (capabilities.maxCommunitySongs ?? FREE_PLAN_LIMITS.communitySaves) - savedCommunitySongIds.length),
-    [capabilities.maxCommunitySongs, savedCommunitySongIds.length],
-  );
+  const handleVote = async (communityEntryId: string, direction: 'UP' | 'DOWN') => {
+    if (!backendApi || votingSongId) {
+      return;
+    }
+
+    const selectedSong = communityCatalog.find((song) => song.id === communityEntryId);
+
+    if (!selectedSong) {
+      return;
+    }
+
+    const voteSongId = resolveCommunityVoteId(selectedSong);
+    setVotingSongId(selectedSong.id);
+
+    try {
+      const nextVotes =
+        selectedSong.votes.currentUserVote === direction
+          ? await backendApi.clearCommunitySongVote(voteSongId)
+          : direction === 'UP'
+            ? await backendApi.voteCommunitySongUp(voteSongId)
+            : await backendApi.voteCommunitySongDown(voteSongId);
+
+      setCommunityCatalog((currentSongs) =>
+        currentSongs.map((song) =>
+          song.id === selectedSong.id
+            ? {
+              ...song,
+              votes: {
+                upVotes: nextVotes.upVotes,
+                downVotes: nextVotes.downVotes,
+                currentUserVote: nextVotes.currentUserVote,
+              },
+            }
+            : song,
+        ),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update vote.';
+      setStatusMessage(message);
+    } finally {
+      setVotingSongId(null);
+    }
+  };
 
   return (
     <ScreenContainer>
@@ -288,10 +561,23 @@ export function ImportScreen({ navigation }: Props) {
           {tier === 'PRO' ? 'Pro Community Access' : 'Free Community Access'}
         </Text>
         <Text style={styles.planText}>
-          {tier === 'PRO'
-            ? 'You can save every community song you need.'
-            : `${freeSaveSlotsLeft} of ${capabilities.maxCommunitySongs ?? FREE_PLAN_LIMITS.communitySaves} free saves left. Upgrade to unlock unlimited saves.`}
+          {hasCommunityLimit
+            ? `${communitySongsSaved} of ${planCommunitySaveLimit} community saves used`
+            : 'Unlimited community saves'}
         </Text>
+        {hasCommunityLimit && planCommunitySaveLimit > communitySongsSaved ? (
+          <Text style={styles.planSubText}>
+            Unlock unlimited saves to keep every community chart you love.
+          </Text>
+        ) : null}
+        <Pressable
+          style={styles.proLink}
+          onPress={() => {
+            navigation.navigate('Upgrade');
+          }}
+        >
+          <Text style={styles.proLinkText}>See Pro benefits →</Text>
+        </Pressable>
       </View>
 
       <Text style={styles.statusText}>{statusMessage}</Text>
@@ -309,29 +595,88 @@ export function ImportScreen({ navigation }: Props) {
       ) : (
         communityCatalog.map((song) => {
           const isSaving = savingSongId === song.id;
+          const isPreviewLoading = previewLoadingSongId === song.id;
+          const isVoting = votingSongId === song.id;
+          const dateLabel = formatPublishedDateLabel(song.publishedAt ?? song.updatedAt ?? null);
 
           return (
-            <View key={song.id} style={styles.card}>
-              <View style={styles.cardCopy}>
-                <Text style={styles.cardTitle}>{song.title}</Text>
-                <Text style={styles.cardMeta}>
-                  {song.artist} • {song.key} • {song.tuning}
-                </Text>
-              </View>
-
-              <PrimaryButton
-                label={isSaving ? 'Saving...' : 'Save to Library'}
-                onPress={() => {
-                  void handleSaveCommunitySong(song.id);
-                }}
-                disabled={isSaving}
-                variant="primary"
-                size="compact"
-              />
-            </View>
+            <SongListItem
+              key={song.id}
+              style={styles.songRow}
+              title={song.title}
+              artist={song.artist}
+              keySignature={song.key ?? 'E'}
+              tuning={song.tuning ?? 'EADG'}
+              contributorName={song.author?.displayName ?? song.author?.userId}
+              contributorEmoji={song.author ? '👤' : undefined}
+              contributionDate={dateLabel}
+              voteScore={song.votes.upVotes - song.votes.downVotes}
+              userVote={song.votes.currentUserVote}
+              onPreview={() => {
+                void handleOpenPreview(song);
+              }}
+              onUpVote={() => {
+                void handleVote(song.id, 'UP');
+              }}
+              onDownVote={() => {
+                void handleVote(song.id, 'DOWN');
+              }}
+              actionLabel={isSaving ? 'Moving...' : 'Copy Song to Library'}
+              onAction={() => {
+                void handleSaveCommunitySong(song.id);
+              }}
+              actionDisabled={isSaving || isPreviewLoading}
+            />
           );
         })
       )}
+
+      <Modal
+        visible={Boolean(previewData)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewData(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.previewModalCard}>
+            {previewData ? (
+              <>
+                <View style={styles.previewHeader}>
+                  <Text style={styles.previewTitle}>{previewData.title}</Text>
+                  <Text style={styles.previewMeta}>
+                    {previewData.artist} • {previewData.key} • {previewData.tuning}
+                  </Text>
+                  <AuthorChip author={previewData.author} fallbackName={previewData.artist} />
+                </View>
+
+                <ScrollView
+                  style={styles.previewScroll}
+                  contentContainerStyle={styles.previewScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <TabPagePreview
+                    stringNames={previewData.stringNames}
+                    bars={previewData.bars}
+                    rowAnnotations={previewData.rowAnnotations}
+                    rowBarCounts={previewData.rowBarCounts}
+                    renderMode="ascii"
+                    compact
+                  />
+                </ScrollView>
+
+                <View style={styles.previewActions}>
+                  <PrimaryButton
+                    label="Close"
+                    onPress={() => setPreviewData(null)}
+                    variant="ghost"
+                    size="compact"
+                  />
+                </View>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
@@ -360,6 +705,16 @@ const styles = StyleSheet.create({
     borderColor: '#1f2937',
     gap: 4,
   },
+  proLink: {
+    alignSelf: 'flex-end',
+    marginTop: 4,
+  },
+  proLinkText: {
+    fontSize: 12,
+    letterSpacing: 0.5,
+    color: '#fbbf24',
+    fontWeight: '700',
+  },
   planTitle: {
     fontSize: 18,
     fontWeight: '800',
@@ -370,30 +725,127 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#cbd5e1',
   },
+  planSubText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#9ca3af',
+    marginTop: 4,
+  },
   statusText: {
     fontSize: 13,
     lineHeight: 20,
     color: palette.textMuted,
   },
-  card: {
-    backgroundColor: palette.surface,
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: palette.border,
-    gap: 12,
+  songRow: {
+    marginVertical: 6,
   },
-  cardCopy: {
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  authorAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    backgroundColor: '#dbeafe',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authorAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  authorAvatarFallback: {
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '800',
+    color: '#1e3a8a',
+  },
+  authorText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#475569',
+    fontWeight: '700',
+  },
+  votePill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  votePillActiveUp: {
+    borderColor: '#67e8f9',
+    backgroundColor: '#cffafe',
+  },
+  votePillActiveDown: {
+    borderColor: '#fecaca',
+    backgroundColor: '#fee2e2',
+  },
+  votePillLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  votePillLabelActiveUp: {
+    color: '#155e75',
+  },
+  votePillLabelActiveDown: {
+    color: '#991b1b',
+  },
+  authorDateStack: {
+    alignItems: 'flex-end',
     gap: 4,
   },
-  cardTitle: {
-    fontSize: 22,
-    fontWeight: '700',
+  authorRowRight: {
+    marginTop: 0,
+  },
+  previewModalCard: {
+    width: '100%',
+    maxWidth: 720,
+    maxHeight: '86%',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    padding: 14,
+    gap: 10,
+  },
+  previewHeader: {
+    gap: 4,
+  },
+  previewTitle: {
+    fontSize: 20,
+    fontWeight: '800',
     color: palette.text,
   },
-  cardMeta: {
-    fontSize: 14,
+  previewMeta: {
+    fontSize: 13,
     color: palette.textMuted,
-    lineHeight: 20,
+  },
+  previewScroll: {
+    maxHeight: 420,
+  },
+  previewScrollContent: {
+    paddingVertical: 4,
+  },
+  previewActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.48)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
   },
 });

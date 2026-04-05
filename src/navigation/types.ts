@@ -16,8 +16,9 @@ export type RootStackParamList = {
   Account: undefined;
   Upgrade: undefined;
   MainTabs: NavigatorScreenParams<TabParamList> | undefined;
-  SongEditor: { songId: string };
+  SongEditor: { songId: string; isNew?: boolean };
   PerformanceView: { songId: string; sectionIndex?: number };
+  SetlistPerformance: { setlistId?: string; startSongId?: string } | undefined;
   ExportSong: { songId: string };
   ExportSetlist: undefined;
   ImportDetail: { type: 'image' | 'pdf' };

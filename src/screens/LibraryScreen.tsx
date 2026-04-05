@@ -13,9 +13,10 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { SearchBar } from '../components/SearchBar';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
-import { resolveUpgradeTrigger, useUpgradePrompt } from '../features/subscription';
+import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../features/subscription';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
+import { usePublishedSongLookup } from '../hooks/usePublishedSongLookup';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<TabParamList, 'Library'>,
@@ -23,25 +24,24 @@ type Props = CompositeScreenProps<
 >;
 
 export function LibraryScreen({ navigation }: Props) {
+  const { tier } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const {
     songs,
     createSong,
     deleteSong,
-    updateSong,
-    loadStateFromFile,
-    saveStateToFile,
   } = useBassTab();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
+  const { lookup: publishedBySourceSongId, refresh: refreshPublishedLookup } = usePublishedSongLookup(
+    backendApi,
+  );
   const [query, setQuery] = useState('');
   const [publishingSongId, setPublishingSongId] = useState<string | null>(null);
   const [songPendingDelete, setSongPendingDelete] = useState<{
     id: string;
     title: string;
   } | null>(null);
-  const [fileActionMessage, setFileActionMessage] = useState(
-    'Pack Away saves your charts here; Bring It Back restores that saved copy.',
-  );
+  const [statusMessage, setStatusMessage] = useState('');
 
   const filteredSongs = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -61,7 +61,7 @@ export function LibraryScreen({ navigation }: Props) {
   const handleCreateSong = async () => {
     try {
       const song = await createSong();
-      navigation.navigate('SongEditor', { songId: song.id });
+      navigation.navigate('SongEditor', { songId: song.id, isNew: true });
     } catch (error) {
       const trigger = resolveUpgradeTrigger(error);
 
@@ -71,27 +71,7 @@ export function LibraryScreen({ navigation }: Props) {
       }
 
       const message = error instanceof Error ? error.message : 'Could not create song.';
-      setFileActionMessage(`Could not create song: ${message}`);
-    }
-  };
-
-  const handleSaveState = async () => {
-    try {
-      const target = await saveStateToFile();
-      setFileActionMessage(`Packed away for later in ${target}.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not pack it away.';
-      setFileActionMessage(`Could not pack it away: ${message}`);
-    }
-  };
-
-  const handleLoadState = async () => {
-    try {
-      const source = await loadStateFromFile();
-      setFileActionMessage(`Packed charts brought back from ${source}.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not bring it back.';
-      setFileActionMessage(`Could not bring it back: ${message}`);
+      setStatusMessage(`Could not create song: ${message}`);
     }
   };
 
@@ -113,24 +93,24 @@ export function LibraryScreen({ navigation }: Props) {
     setPublishingSongId(song.id);
 
     try {
-      if (song.releasedToCommunity) {
-        await backendApi.unreleaseSongFromCommunity(song.id);
-        updateSong(song.id, {
-          releasedToCommunity: false,
-          communityReleasedAt: null,
-        });
-        setFileActionMessage(`"${song.title}" removed from Community.`);
+      const existingPublishedSongId = publishedBySourceSongId[song.id];
+
+      if (existingPublishedSongId) {
+        await backendApi.unlistPublishedSong(existingPublishedSongId);
+        await refreshPublishedLookup();
+        setStatusMessage(`"${song.title}" unlisted from Community.`);
       } else {
-        await backendApi.releaseSongToCommunity(song.id);
-        updateSong(song.id, {
-          releasedToCommunity: true,
-          communityReleasedAt: new Date().toISOString(),
-        });
-        setFileActionMessage(`"${song.title}" is now live in Community.`);
+        await backendApi.publishSong(song.id);
+        const nextLookup = await refreshPublishedLookup();
+        setStatusMessage(
+          nextLookup[song.id]
+            ? `"${song.title}" is now live in Community.`
+            : `"${song.title}" published. It may take a moment to appear in Community.`,
+        );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not update community release.';
-      setFileActionMessage(message);
+      const message = error instanceof Error ? error.message : 'Could not update community publish state.';
+      setStatusMessage(message);
     } finally {
       setPublishingSongId(null);
     }
@@ -143,7 +123,7 @@ export function LibraryScreen({ navigation }: Props) {
 
     deleteSong(songPendingDelete.id);
     setSongPendingDelete(null);
-    setFileActionMessage('Song binned.');
+    setStatusMessage('Song binned.');
   };
 
   return (
@@ -164,13 +144,12 @@ export function LibraryScreen({ navigation }: Props) {
           onGoPro={() => navigation.navigate('Upgrade')}
         />
         <View style={styles.actionRow}>
-          <PrimaryButton label="Pack Away" onPress={handleSaveState} variant="secondary" />
-          <PrimaryButton label="Bring It Back" onPress={handleLoadState} variant="ghost" />
           <PrimaryButton label="New Song" onPress={handleCreateSong} />
         </View>
+        <Text style={styles.actionHint}>Create a bass tab in under a minute.</Text>
       </View>
 
-      <Text style={styles.storageNote}>{fileActionMessage}</Text>
+      {statusMessage ? <Text style={styles.storageNote}>{statusMessage}</Text> : null}
 
       <SearchBar value={query} onChangeText={setQuery} />
 
@@ -194,7 +173,10 @@ export function LibraryScreen({ navigation }: Props) {
                 }
                 : undefined
             }
+            isPublishedToCommunity={Boolean(publishedBySourceSongId[song.id])}
+            onLockedCommunityAction={() => showUpgradePrompt('COMMUNITY_SAVE')}
             isCommunityReleaseUpdating={publishingSongId === song.id}
+            isCommunityActionLocked={tier === 'FREE'}
           />
         ))
       )}
@@ -255,6 +237,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+  },
+  actionHint: {
+    marginTop: -4,
+    fontSize: 13,
+    color: palette.textMuted,
   },
   storageNote: {
     fontSize: 13,

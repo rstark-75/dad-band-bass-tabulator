@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { createAuthApiFromEnv } from '../api/authApi.ts';
+import { subscribeBassTabApiUnauthorized } from '../../../api/bassTabApi';
 import { createAuthActions } from './authActions.ts';
 import { authReducer } from './authReducer.ts';
 import { initialAuthStoreState } from './authTypes.ts';
@@ -42,6 +43,28 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     void actions.restoreSession();
   }, [actions]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeBassTabApiUnauthorized(() => {
+      const current = stateRef.current.authState;
+
+      if (current.type !== 'AUTHENTICATED') {
+        return;
+      }
+
+      dispatch({
+        type: 'setDraftSignIn',
+        userId: current.user.userId,
+        email: current.user.email,
+        avatarUrl: current.user.avatarUrl ?? '',
+      });
+      dispatch({ type: 'setUnauthenticated' });
+      dispatch({ type: 'setError', errorMessage: 'Session expired. Please sign in again.' });
+      dispatch({ type: 'setLoading', loadingAction: null });
+    });
+
+    return unsubscribe;
+  }, []);
 
   const value = useMemo(
     () => ({

@@ -1,9 +1,10 @@
 import { AuthApi, AuthApiError } from '../api/authApi.ts';
 import type { AuthEvent } from './authReducer.ts';
-import type { AuthStoreState } from './authTypes.ts';
+import type { AuthIntent, AuthStoreState } from './authTypes.ts';
 import { toAuthErrorMessage } from '../utils/authErrorMessage.ts';
 import { isValidEmail, normalizeEmail } from '../utils/email.ts';
 import { sanitizeCode } from '../utils/codeInput.ts';
+import { isValidUserId, normalizeUserId } from '../utils/userId.ts';
 
 interface ActionDeps {
   api: AuthApi | null;
@@ -24,6 +25,34 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     dispatch({ type: 'setError', errorMessage });
   };
 
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  const resolveSessionAfterAuth = async () => {
+    const retryDelaysMs = [0, 150, 400];
+    let lastError: unknown = null;
+
+    for (const delayMs of retryDelaysMs) {
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+
+      try {
+        return await requireApi().getSession();
+      } catch (error) {
+        lastError = error;
+
+        if (!(error instanceof AuthApiError) || error.status !== 401) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError ?? new AuthApiError('Authentication required.');
+  };
+
   const restoreSession = async () => {
     dispatch({ type: 'setLoading', loadingAction: 'restoreSession' });
     dispatch({ type: 'setRestoring' });
@@ -32,7 +61,12 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     try {
       const session = await requireApi().getSession();
       dispatch({ type: 'setAuthenticated', user: session.user });
-      dispatch({ type: 'setDraftEmail', email: session.user.email });
+      dispatch({
+        type: 'setDraftSignIn',
+        userId: session.user.userId,
+        email: session.user.email,
+        avatarUrl: session.user.avatarUrl ?? '',
+      });
       setError(null);
     } catch (error) {
       if (error instanceof AuthApiError && error.status === 401) {
@@ -47,12 +81,32 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     }
   };
 
-  const startAuth = async (rawEmail: string, mode: 'start' | 'resend' = 'start') => {
-    const email = normalizeEmail(rawEmail);
-    dispatch({ type: 'setDraftEmail', email });
+  const startAuth = async (
+    {
+      rawUserId,
+      rawEmail,
+      rawAvatarUrl,
+      intent,
+    }: {
+      rawUserId: string;
+      rawEmail?: string;
+      rawAvatarUrl?: string;
+      intent: AuthIntent;
+    },
+    mode: 'start' | 'resend' = 'start',
+  ) => {
+    const userId = normalizeUserId(rawUserId);
+    const email = rawEmail ? normalizeEmail(rawEmail) : '';
+    const avatarUrl = (rawAvatarUrl ?? '').trim();
+    dispatch({ type: 'setDraftSignIn', userId, email, avatarUrl, intent });
     setError(null);
 
-    if (!isValidEmail(email)) {
+    if (!isValidUserId(userId)) {
+      setError('Choose a user ID with 3-24 lowercase letters, numbers, or underscores.');
+      return;
+    }
+
+    if (intent === 'REGISTER' && !isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
     }
@@ -63,11 +117,19 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     });
 
     try {
-      const response = await requireApi().startAuth(email);
+      const response = await requireApi().startAuth({
+        userId,
+        email: email || undefined,
+        mode: intent,
+        avatarUrl: avatarUrl || undefined,
+      });
       dispatch({
         type: 'setCheckEmail',
-        email,
+        userId,
+        email: response.email ?? email,
         maskedEmail: response.maskedEmail,
+        mode: intent,
+        avatarUrl: avatarUrl || undefined,
         nextAllowedResendAt: response.nextAllowedResendAt,
       });
       setError(null);
@@ -85,16 +147,40 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
       return;
     }
 
-    await startAuth(state.email, 'resend');
+    await startAuth(
+      {
+        rawUserId: state.userId,
+        rawEmail: state.email,
+        rawAvatarUrl: state.avatarUrl,
+        intent: state.mode,
+      },
+      'resend',
+    );
   };
 
-  const verifyCode = async (rawEmail: string, rawCode: string) => {
-    const email = normalizeEmail(rawEmail);
+  const verifyCode = async (
+    {
+      rawUserId,
+      rawEmail,
+      rawCode,
+    }: {
+      rawUserId: string;
+      rawEmail?: string;
+      rawCode: string;
+    },
+  ) => {
+    const userId = normalizeUserId(rawUserId);
+    const email = rawEmail ? normalizeEmail(rawEmail) : '';
     const code = sanitizeCode(rawCode);
-    dispatch({ type: 'setDraftEmail', email });
+    dispatch({ type: 'setDraftSignIn', userId, email, avatarUrl: getState().draftAvatarUrl });
     setError(null);
 
-    if (!isValidEmail(email)) {
+    if (!isValidUserId(userId)) {
+      setError('Invalid user ID.');
+      return;
+    }
+
+    if (email && !isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
     }
@@ -107,15 +193,26 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     dispatch({ type: 'setLoading', loadingAction: 'verifyCode' });
 
     try {
-      const response = await requireApi().verifyCode(email, code);
-      dispatch({ type: 'setAuthenticated', user: response.user });
-      dispatch({ type: 'setDraftEmail', email: response.user.email });
+      await requireApi().verifyCode({ userId, email: email || undefined, code });
+      const session = await resolveSessionAfterAuth();
+      dispatch({ type: 'setAuthenticated', user: session.user });
+      dispatch({
+        type: 'setDraftSignIn',
+        userId: session.user.userId,
+        email: session.user.email,
+        avatarUrl: session.user.avatarUrl ?? '',
+      });
       setError(null);
     } catch (error) {
       try {
         const session = await requireApi().getSession();
         dispatch({ type: 'setAuthenticated', user: session.user });
-        dispatch({ type: 'setDraftEmail', email: session.user.email });
+        dispatch({
+          type: 'setDraftSignIn',
+          userId: session.user.userId,
+          email: session.user.email,
+          avatarUrl: session.user.avatarUrl ?? '',
+        });
         setError(null);
         return;
       } catch (_sessionError) {
@@ -140,15 +237,26 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     dispatch({ type: 'setLoading', loadingAction: 'verifyLink' });
 
     try {
-      const response = await requireApi().verifyLink(token.trim());
-      dispatch({ type: 'setAuthenticated', user: response.user });
-      dispatch({ type: 'setDraftEmail', email: response.user.email });
+      await requireApi().verifyLink(token.trim());
+      const session = await resolveSessionAfterAuth();
+      dispatch({ type: 'setAuthenticated', user: session.user });
+      dispatch({
+        type: 'setDraftSignIn',
+        userId: session.user.userId,
+        email: session.user.email,
+        avatarUrl: session.user.avatarUrl ?? '',
+      });
       setError(null);
     } catch (error) {
       try {
         const session = await requireApi().getSession();
         dispatch({ type: 'setAuthenticated', user: session.user });
-        dispatch({ type: 'setDraftEmail', email: session.user.email });
+        dispatch({
+          type: 'setDraftSignIn',
+          userId: session.user.userId,
+          email: session.user.email,
+          avatarUrl: session.user.avatarUrl ?? '',
+        });
         setError(null);
         return;
       } catch (_sessionError) {
@@ -166,7 +274,13 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     const current = getState().authState;
 
     if (current.type === 'CHECK_EMAIL') {
-      dispatch({ type: 'setDraftEmail', email: current.email });
+      dispatch({
+        type: 'setDraftSignIn',
+        userId: current.userId,
+        email: current.email,
+        avatarUrl: current.avatarUrl ?? '',
+        intent: current.mode,
+      });
     }
 
     dispatch({ type: 'setUnauthenticated' });
@@ -175,7 +289,11 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
 
   const logout = async () => {
     const current = getState().authState;
+    const fallbackUserId = current.type === 'AUTHENTICATED' ? current.user.userId : getState().draftUserId;
     const fallbackEmail = current.type === 'AUTHENTICATED' ? current.user.email : getState().draftEmail;
+    const fallbackAvatar = current.type === 'AUTHENTICATED'
+      ? (current.user.avatarUrl ?? '')
+      : getState().draftAvatarUrl;
 
     dispatch({ type: 'setLoading', loadingAction: 'logout' });
     setError(null);
@@ -188,7 +306,12 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
       console.warn('Auth logout failed', error);
       setError(toAuthErrorMessage('logout', error));
     } finally {
-      dispatch({ type: 'setDraftEmail', email: fallbackEmail });
+      dispatch({
+        type: 'setDraftSignIn',
+        userId: fallbackUserId,
+        email: fallbackEmail,
+        avatarUrl: fallbackAvatar,
+      });
       dispatch({ type: 'setUnauthenticated' });
       dispatch({ type: 'setLoading', loadingAction: null });
     }
@@ -196,6 +319,27 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
 
   const clearError = () => {
     setError(null);
+  };
+
+  const updateLocalProfile = (updates: { avatarUrl?: string | null }) => {
+    const current = getState().authState;
+
+    if (current.type !== 'AUTHENTICATED') {
+      return;
+    }
+
+    const nextUser = {
+      ...current.user,
+      ...(updates.avatarUrl !== undefined ? { avatarUrl: updates.avatarUrl } : {}),
+    };
+
+    dispatch({ type: 'setAuthenticated', user: nextUser });
+    dispatch({
+      type: 'setDraftSignIn',
+      userId: nextUser.userId,
+      email: nextUser.email,
+      avatarUrl: nextUser.avatarUrl ?? '',
+    });
   };
 
   return {
@@ -207,5 +351,6 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     useDifferentEmail,
     logout,
     clearError,
+    updateLocalProfile,
   };
 };

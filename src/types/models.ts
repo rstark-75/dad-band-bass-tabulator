@@ -24,6 +24,43 @@ export interface SongChart {
   rowBarCounts: number[];
 }
 
+export type PublishedSongStatus = 'PUBLISHED' | 'UNLISTED' | 'MODERATION_HIDDEN';
+
+export type CommunitySongAuthor = {
+  userId: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+};
+
+export type CommunitySongVoteDirection = 'UP' | 'DOWN';
+
+export type CommunitySongVotes = {
+  upVotes: number;
+  downVotes: number;
+  currentUserVote: CommunitySongVoteDirection | null;
+};
+
+export type CommunitySongCard = {
+  id: string;
+  publishedSongId?: string | null;
+  sourceSongId?: string | null;
+  title: string;
+  artist: string;
+  key?: string | null;
+  tuning?: string | null;
+  feelNote?: string | null;
+  author?: CommunitySongAuthor;
+  votes: CommunitySongVotes;
+  publishedAt: string;
+  updatedAt: string;
+};
+
+export type CommunitySongDetail = CommunitySongCard & {
+  chart: SongChart;
+  status?: PublishedSongStatus;
+  sourceSongId?: string;
+};
+
 export interface Song {
   id: string;
   title: string;
@@ -32,8 +69,6 @@ export interface Song {
   feelNote: string;
   tuning: string;
   updatedAt: string;
-  releasedToCommunity?: boolean;
-  communityReleasedAt?: string | null;
   stringNames: string[];
   rows: SongRow[];
 }

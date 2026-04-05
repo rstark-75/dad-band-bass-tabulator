@@ -8,6 +8,16 @@ export const isEmptySlotValue = (value: string): boolean => {
   return trimmed === '' || trimmed === EMPTY_SLOT || /^-+$/.test(trimmed);
 };
 
+export const isNumericTabValue = (value: string): boolean => {
+  const trimmed = value.trim();
+
+  if (!trimmed || trimmed === EMPTY_SLOT) {
+    return false;
+  }
+
+  return /^\d+$/.test(trimmed.replace(/-+$/g, ''));
+};
+
 const mapEmptyCountToStyle = (emptyCount: number): NoteRenderStyle => {
   if (emptyCount === 0) {
     return 'short';
@@ -46,7 +56,7 @@ const hasNoteAtSlotOnString = (
     return false;
   }
 
-  return !isEmptySlotValue(value);
+  return isNumericTabValue(value);
 };
 
 const computeEmptySlotsOnString = (

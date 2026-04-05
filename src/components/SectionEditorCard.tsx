@@ -33,6 +33,7 @@ interface SectionEditorCardProps {
   isFirst: boolean;
   isLast: boolean;
   showSectionControls?: boolean;
+  saveSignal?: number;
   onChange: (updates: Partial<SongChart>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -46,55 +47,13 @@ const baseFretOptions = Array.from({ length: 12 }, (_value, index) => String(ind
 const extendedFretOptions = ['13', '14', '15', '16', '17', '18', '19', '/', '\\'];
 const PREVIEW_RENDER_MODES: TabPreviewRenderMode[] = ['ascii', 'svg'];
 
-const parseAnnotationControls = (value: string) => {
-  const alignMatch = value.trim().match(/^\[(left|center|right)\]\s*/i);
-  const align = (alignMatch?.[1].toLowerCase() as 'left' | 'center' | 'right' | undefined) ?? 'left';
-  const textWithoutAlign = alignMatch ? value.trim().slice(alignMatch[0].length) : value;
-  const bold = /^\*\*.*\*\*$/.test(textWithoutAlign.trim());
-  const underline = /^__.*__$/.test(textWithoutAlign.trim());
-  const plainText = textWithoutAlign.trim().replace(/^\*\*(.*)\*\*$/, '$1').replace(/^__(.*)__$/, '$1');
-
-  return { align, bold, underline, plainText };
-};
-
-const withAnnotationStyle = (
-  value: string,
-  next: Partial<{ align: 'left' | 'center' | 'right'; bold: boolean; underline: boolean }>,
-) => {
-  const current = parseAnnotationControls(value);
-  const align = next.align ?? current.align;
-  const bold = next.bold ?? current.bold;
-  const underline = next.underline ?? current.underline;
-  let text = current.plainText;
-
-  if (bold) {
-    text = `**${text}**`;
-  } else if (underline) {
-    text = `__${text}__`;
-  }
-
-  return `${align === 'left' ? '' : `[${align}] `}${text}`.trim();
-};
-
-const withAnnotationText = (value: string, nextText: string) => {
-  const current = parseAnnotationControls(value);
-  let text = nextText;
-
-  if (current.bold) {
-    text = `**${text}**`;
-  } else if (current.underline) {
-    text = `__${text}__`;
-  }
-
-  return `${current.align === 'left' ? '' : `[${current.align}] `}${text}`.trim();
-};
-
 export function SectionEditorCard({
   section,
   index,
   isFirst,
   isLast,
   showSectionControls = true,
+  saveSignal = 0,
   onChange,
   onMoveUp,
   onMoveDown,
@@ -117,6 +76,7 @@ export function SectionEditorCard({
     rowAnnotations?: TabRowAnnotation[];
     rowBarCounts?: number[];
   } | null>(null);
+  const lastHandledSaveSignal = useRef(saveSignal);
   const inputRefs = useRef<Record<string, TextInput | null>>({});
   const quickPreviewRenderMode: TabPreviewRenderMode = !capabilities.svgEnabled ? 'ascii' : renderMode;
 
@@ -277,6 +237,18 @@ export function SectionEditorCard({
     setActiveRowIndex(-1);
     setRowEditSnapshot(null);
   };
+
+  useEffect(() => {
+    if (saveSignal === lastHandledSaveSignal.current) {
+      return;
+    }
+
+    lastHandledSaveSignal.current = saveSignal;
+
+    if (activeRowIndex >= 0) {
+      handleSaveRowEdit();
+    }
+  }, [activeRowIndex, saveSignal]);
 
   return (
     <View style={styles.card}>
@@ -802,13 +774,15 @@ function RowEditor({
   const [copiedBar, setCopiedBar] = useState<ParsedBar | null>(null);
   const isCompactViewport = width < 900;
   const isSmallViewport = width < 640;
-  const useSimpleAnnotationFields = width < 760;
   const useMobileCellEditor = width < 760;
   const cellSize = isSmallViewport ? 26 : isCompactViewport ? 28 : 32;
   const cellGap = isSmallViewport ? 3 : 4;
   const barPadding = isSmallViewport ? 4 : 6;
   const barWidth = cellSize * beatLabels.length + cellGap * (beatLabels.length - 1) + barPadding * 2;
   const footerButtonWidth = Math.floor((barWidth - barPadding * 2 - cellGap) / 2);
+  const actionButtonWidth = Math.max(86, Math.min(96, footerButtonWidth - 10));
+  const gridScrollRef = useRef<ScrollView | null>(null);
+  const pendingBarSelectionRef = useRef<number | null>(null);
   const [selectedCell, setSelectedCell] = useState<{
     globalBarIndex: number;
     rowBarIndex: number;
@@ -816,7 +790,7 @@ function RowEditor({
     stringIndex: number;
     slotIndex: number;
   } | null>(null);
-  const [activeMobileBarIndex, setActiveMobileBarIndex] = useState(0);
+  const [activeBarIndex, setActiveBarIndex] = useState(0);
   const [showExtendedFretPad, setShowExtendedFretPad] = useState(false);
 
   useEffect(() => {
@@ -825,7 +799,7 @@ function RowEditor({
       return;
     }
 
-    setActiveMobileBarIndex(0);
+    setActiveBarIndex(0);
     setShowExtendedFretPad(false);
     setSelectedCell({
       globalBarIndex: row.startBarIndex,
@@ -842,13 +816,58 @@ function RowEditor({
     }
 
     setSelectedCell((currentCell) => ({
-      globalBarIndex: row.startBarIndex + activeMobileBarIndex,
-      rowBarIndex: activeMobileBarIndex,
+      globalBarIndex: row.startBarIndex + activeBarIndex,
+      rowBarIndex: activeBarIndex,
       stringName: currentCell?.stringName ?? stringNames[0],
       stringIndex: currentCell?.stringIndex ?? 0,
       slotIndex: currentCell?.slotIndex ?? 0,
     }));
-  }, [activeMobileBarIndex, row.startBarIndex, stringNames, useMobileCellEditor]);
+  }, [activeBarIndex, row.startBarIndex, stringNames, useMobileCellEditor]);
+
+  useEffect(() => {
+    if (pendingBarSelectionRef.current !== null) {
+      const nextBarIndex = pendingBarSelectionRef.current;
+      pendingBarSelectionRef.current = null;
+      selectBar(nextBarIndex);
+      return;
+    }
+
+    setActiveBarIndex((current) => Math.max(0, Math.min(row.bars.length - 1, current)));
+  }, [row.bars.length]);
+
+  useEffect(() => {
+    if (useMobileCellEditor || !gridScrollRef.current) {
+      return;
+    }
+
+    const horizontalOffset = Math.max(0, activeBarIndex * (barWidth + 8) - barWidth);
+
+    gridScrollRef.current.scrollTo({
+      x: horizontalOffset,
+      animated: true,
+    });
+  }, [activeBarIndex, barWidth, useMobileCellEditor]);
+
+  const selectBar = (rowBarIndex: number) => {
+    const nextBarIndex = Math.max(0, Math.min(row.bars.length - 1, rowBarIndex));
+    setActiveBarIndex(nextBarIndex);
+    setSelectedCell((currentCell) => {
+      if (!useMobileCellEditor && !currentCell) {
+        return currentCell;
+      }
+
+      const safeStringIndex = Math.max(0, Math.min(stringNames.length - 1, currentCell?.stringIndex ?? 0));
+      const safeSlotIndex = Math.max(0, Math.min(beatLabels.length - 1, currentCell?.slotIndex ?? 0));
+
+      return {
+        globalBarIndex: row.startBarIndex + nextBarIndex,
+        rowBarIndex: nextBarIndex,
+        stringName: stringNames[safeStringIndex],
+        stringIndex: safeStringIndex,
+        slotIndex: safeSlotIndex,
+      };
+    });
+  };
 
   const clearBar = (barIndex: number) => {
     const nextBars = bars.map((bar, currentBarIndex) => {
@@ -876,9 +895,25 @@ function RowEditor({
       return;
     }
 
+    let nextBars = bars;
+
+    if (nextCount > row.barCount) {
+      for (let index = 0; index < nextCount - row.barCount; index += 1) {
+        nextBars = insertBar(
+          nextBars,
+          row.startBarIndex + row.barCount + index,
+          stringNames,
+        );
+      }
+    } else {
+      for (let index = row.barCount - 1; index >= nextCount; index -= 1) {
+        nextBars = removeBar(nextBars, row.startBarIndex + index, stringNames);
+      }
+    }
+
     const nextRowBarCounts = [...rowBarCounts];
     nextRowBarCounts[row.rowIndex] = nextCount;
-    onChartChange(bars, undefined, nextRowBarCounts);
+    onChartChange(nextBars, undefined, nextRowBarCounts);
   };
 
   const replaceBar = (barIndex: number, nextBar: ParsedBar) => {
@@ -902,18 +937,15 @@ function RowEditor({
     ),
   });
 
-  const applyRowCountDelta = (
+  const commitRowMutation = (
     nextBars: ReturnType<typeof parseTab>['bars'],
-    delta: -1 | 1,
+    nextCount: number,
+    nextSelectedBarIndex: number,
   ) => {
-    const nextCount = Math.max(1, Math.min(8, row.barCount + delta));
-
-    if (nextCount === row.barCount) {
-      return;
-    }
-
+    const normalizedNextCount = Math.max(1, Math.min(8, nextCount));
     const nextRowBarCounts = [...rowBarCounts];
-    nextRowBarCounts[row.rowIndex] = nextCount;
+    nextRowBarCounts[row.rowIndex] = normalizedNextCount;
+    pendingBarSelectionRef.current = Math.max(0, Math.min(normalizedNextCount - 1, nextSelectedBarIndex));
     onChartChange(nextBars, undefined, nextRowBarCounts);
   };
 
@@ -937,14 +969,11 @@ function RowEditor({
       stringIndex: nextStringIndex,
       slotIndex: nextSlotIndex,
     });
-
-    if (useMobileCellEditor) {
-      setActiveMobileBarIndex(nextRowBarIndex);
-    }
+    setActiveBarIndex(nextRowBarIndex);
   };
 
-  const activeMobileBar = row.bars[activeMobileBarIndex];
-  const activeGlobalBarIndex = row.startBarIndex + activeMobileBarIndex;
+  const selectedBar = row.bars[activeBarIndex] ?? row.bars[0];
+  const selectedGlobalBarIndex = row.startBarIndex + activeBarIndex;
   const displayBeatLabels = useMobileCellEditor ? mobileBeatLabels : beatLabels;
   const visibleFretOptions = showExtendedFretPad ? extendedFretOptions : baseFretOptions;
   const selectedCellValue =
@@ -952,86 +981,182 @@ function RowEditor({
       ? row.bars[selectedCell.rowBarIndex]?.cells[selectedCell.stringName]?.[selectedCell.slotIndex] ?? '-'
       : '-';
 
-  const renderBarActions = (bar: ParsedBar, globalBarIndex: number) => (
-    <View style={styles.barFooter}>
-      <PrimaryButton
-        label="Insert"
-        onPress={() =>
-          applyRowCountDelta(
-            insertBar(bars, globalBarIndex, stringNames),
-            1,
-          )
-        }
-        variant="ghost"
-        style={[styles.barFooterButton, { width: footerButtonWidth }]}
-      />
-      <PrimaryButton
-        label="Duplicate"
-        onPress={() =>
-          applyRowCountDelta(
-            insertBar(bars, globalBarIndex + 1, stringNames, bar),
-            1,
-          )
-        }
-        variant="ghost"
-        style={[styles.barFooterButton, { width: footerButtonWidth }]}
-      />
-      <PrimaryButton
-        label="Copy"
-        onPress={() => setCopiedBar(cloneBar(bar))}
-        variant="ghost"
-        style={[styles.barFooterButton, { width: footerButtonWidth }]}
-      />
-      <PrimaryButton
-        label="Paste Here"
-        onPress={() =>
-          copiedBar
-            ? replaceBar(globalBarIndex, copiedBar)
-            : undefined
-        }
-        variant="ghost"
-        style={[
-          styles.barFooterButton,
-          { width: footerButtonWidth },
-          !copiedBar ? styles.disabled : undefined,
-        ]}
-      />
-      <PrimaryButton
-        label="Paste New"
-        onPress={() =>
-          copiedBar
-            ? applyRowCountDelta(
-                insertBar(
-                  bars,
-                  globalBarIndex + 1,
-                  stringNames,
-                  copiedBar,
-                ),
-                1,
-              )
-            : undefined
-        }
-        variant="ghost"
-        style={[
-          styles.barFooterButton,
-          { width: footerButtonWidth },
-          !copiedBar ? styles.disabled : undefined,
-        ]}
-      />
-      <PrimaryButton
-        label="Clear"
-        onPress={() => clearBar(globalBarIndex)}
-        variant="ghost"
-        style={[styles.barFooterButton, { width: footerButtonWidth }]}
-      />
-      <PrimaryButton
-        label="Delete"
-        onPress={() =>
-          applyRowCountDelta(removeBar(bars, globalBarIndex, stringNames), -1)
-        }
-        variant="danger"
-        style={[styles.barFooterButton, { width: footerButtonWidth }]}
-      />
+  const moveSelectedBar = (direction: -1 | 1) => {
+    const nextBarIndex = activeBarIndex + direction;
+
+    if (nextBarIndex < 0 || nextBarIndex >= row.bars.length) {
+      return;
+    }
+
+    const sourceGlobalIndex = row.startBarIndex + activeBarIndex;
+    const targetGlobalIndex = row.startBarIndex + nextBarIndex;
+    const nextBars = [...bars];
+    const sourceBar = nextBars[sourceGlobalIndex];
+    nextBars[sourceGlobalIndex] = nextBars[targetGlobalIndex];
+    nextBars[targetGlobalIndex] = sourceBar;
+    onBarsChange(nextBars);
+    selectBar(nextBarIndex);
+  };
+
+  const insertAfterSelectedBar = () => {
+    commitRowMutation(
+      insertBar(bars, selectedGlobalBarIndex + 1, stringNames),
+      row.barCount + 1,
+      activeBarIndex + 1,
+    );
+  };
+
+  const duplicateSelectedBar = () => {
+    commitRowMutation(
+      insertBar(bars, selectedGlobalBarIndex + 1, stringNames, selectedBar),
+      row.barCount + 1,
+      activeBarIndex + 1,
+    );
+  };
+
+  const deleteSelectedBar = () => {
+    const nextCount = Math.max(1, row.barCount - 1);
+    const nextSelectedIndex = Math.max(0, Math.min(activeBarIndex, nextCount - 1));
+    commitRowMutation(
+      removeBar(bars, selectedGlobalBarIndex, stringNames),
+      nextCount,
+      nextSelectedIndex,
+    );
+  };
+
+  const renderSelectedBarToolbar = () => (
+    <View style={styles.barToolbarRow}>
+      <View style={styles.barToolbarCountField}>
+        <RowBarCountField
+          label="Bars"
+          value={row.barCount}
+          onCommit={updateRowBarCount}
+          inline
+        />
+      </View>
+      <View style={styles.barFooter}>
+        <PrimaryButton
+          label="＋ Insert"
+          onPress={insertAfterSelectedBar}
+          variant="ghost"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+        <PrimaryButton
+          label="⧉ Duplicate"
+          onPress={duplicateSelectedBar}
+          variant="ghost"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+        <PrimaryButton
+          label="← Move"
+          onPress={() => moveSelectedBar(-1)}
+          variant="ghost"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+        <PrimaryButton
+          label="Move →"
+          onPress={() => moveSelectedBar(1)}
+          variant="ghost"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+        <PrimaryButton
+          label="⎘ Copy"
+          onPress={() => setCopiedBar(cloneBar(selectedBar))}
+          variant="ghost"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+        <PrimaryButton
+          label="⎘ Paste"
+          onPress={() =>
+            copiedBar
+              ? replaceBar(selectedGlobalBarIndex, copiedBar)
+              : undefined
+          }
+          variant="ghost"
+          style={[
+            styles.barFooterButton,
+            { width: actionButtonWidth },
+            !copiedBar ? styles.disabled : undefined,
+          ]}
+          size="compact"
+        />
+        <PrimaryButton
+          label="✕ Clear"
+          onPress={() => clearBar(selectedGlobalBarIndex)}
+          variant="ghost"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+        <PrimaryButton
+          label="🗑 Delete"
+          onPress={deleteSelectedBar}
+          variant="danger"
+          size="compact"
+          style={[styles.barFooterButton, { width: actionButtonWidth }]}
+        />
+      </View>
+    </View>
+  );
+
+  const renderBarSelector = () => (
+    <View style={styles.barSelectorPanel}>
+      <Text style={styles.barSelectorTitle}>Select Bar</Text>
+      <Text style={styles.barSelectorHint}>
+        Bar actions apply to the selected bar.
+      </Text>
+      <View style={styles.barSelectorControls}>
+        <PrimaryButton
+          label="←"
+          onPress={() => {
+            if (activeBarIndex > 0) {
+              selectBar(activeBarIndex - 1);
+            }
+          }}
+          variant="ghost"
+          size="compact"
+          style={[styles.barStepButton, activeBarIndex === 0 ? styles.disabled : undefined]}
+        />
+        <View style={styles.barSelectorPills}>
+          {row.bars.map((_bar, rowBarIndex) => (
+            <Pressable
+              key={`${sectionId}-selector-bar-${rowBarIndex}`}
+              onPress={() => selectBar(rowBarIndex)}
+              style={[
+                styles.barSelectorPill,
+                rowBarIndex === activeBarIndex && styles.barSelectorPillActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.barSelectorPillLabel,
+                  rowBarIndex === activeBarIndex && styles.barSelectorPillLabelActive,
+                ]}
+              >
+                {row.startBarIndex + rowBarIndex + 1}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <PrimaryButton
+          label="→"
+          onPress={() => {
+            if (activeBarIndex < row.bars.length - 1) {
+              selectBar(activeBarIndex + 1);
+            }
+          }}
+          variant="ghost"
+          size="compact"
+          style={[
+            styles.barStepButton,
+            activeBarIndex === row.bars.length - 1 ? styles.disabled : undefined,
+          ]}
+        />
+      </View>
     </View>
   );
 
@@ -1047,7 +1172,10 @@ function RowEditor({
           <Text style={styles.activeRowHint}>
             {useMobileCellEditor
               ? `Bars ${row.startBarIndex + 1}-${row.startBarIndex + row.bars.length}. Tap a box, then use the bar and fret buttons below.`
-              : `Bars ${row.startBarIndex + 1}-${row.startBarIndex + row.bars.length}. Dense grid for faster entry.`}
+              : `Bars ${row.startBarIndex + 1}-${row.startBarIndex + row.bars.length}. Click a bar header to select it, then use actions below.`}
+          </Text>
+          <Text style={styles.activeBarHint}>
+            Editing Bar {activeBarIndex + 1} of {row.bars.length}
           </Text>
         </View>
         <View style={styles.activeRowActions}>
@@ -1073,75 +1201,28 @@ function RowEditor({
         minHeight={46}
       />
 
-      <View style={styles.activeMetaFields}>
-        <View style={styles.activeMetaLabelField}>
-          <RowBarCountField
-            label="Bars"
-            value={row.barCount}
-            onCommit={updateRowBarCount}
-          />
-        </View>
-      </View>
+      {useMobileCellEditor ? renderBarSelector() : null}
 
-      {useSimpleAnnotationFields ? (
-        <Field
-          label="Before Row"
-          value={row.annotation.beforeText}
-          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'beforeText', value)}
-          multiline
-          minHeight={72}
-        />
-      ) : (
-        <AnnotationField
-          label="Before Row"
-          value={row.annotation.beforeText}
-          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'beforeText', value)}
-        />
-      )}
+      {selectedBar ? renderSelectedBarToolbar() : null}
+
+      <AnnotationField
+        label="Before Row"
+        value={row.annotation.beforeText}
+        onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'beforeText', value)}
+      />
 
       {useMobileCellEditor ? (
         <View style={styles.mobileEditorStack}>
-          <View style={styles.mobileBarSelector}>
-            {row.bars.map((_bar, rowBarIndex) => (
-              <Pressable
-                key={`${sectionId}-mobile-bar-${rowBarIndex}`}
-                onPress={() => {
-                  setActiveMobileBarIndex(rowBarIndex);
-                  setSelectedCell((currentCell) => ({
-                    globalBarIndex: row.startBarIndex + rowBarIndex,
-                    rowBarIndex,
-                    stringName: currentCell?.stringName ?? stringNames[0],
-                    stringIndex: currentCell?.stringIndex ?? 0,
-                    slotIndex: currentCell?.slotIndex ?? 0,
-                  }));
-                }}
-                style={[
-                  styles.mobileBarButton,
-                  activeMobileBarIndex === rowBarIndex && styles.mobileBarButtonActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.mobileBarButtonLabel,
-                    activeMobileBarIndex === rowBarIndex && styles.mobileBarButtonLabelActive,
-                  ]}
-                >
-                  {row.startBarIndex + rowBarIndex + 1}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {activeMobileBar ? (
+          {selectedBar ? (
             <View style={styles.mobileSingleBarPanel}>
               <View style={styles.gridRow}>
                 <View style={styles.labelCell} />
                 <View style={[styles.barBlock, styles.mobileBarBlock, { width: barWidth, padding: barPadding }]}>
-                  <Text style={styles.barBlockTitle}>Bar {activeGlobalBarIndex + 1}</Text>
+                  <Text style={styles.barBlockTitle}>Bar {selectedGlobalBarIndex + 1}</Text>
                   <View style={[styles.beatRow, { gap: cellGap }]}>
                     {displayBeatLabels.map((label) => (
                       <View
-                        key={`${sectionId}-row-${row.rowIndex}-mobile-beat-${activeMobileBarIndex}-${label}`}
+                        key={`${sectionId}-row-${row.rowIndex}-mobile-beat-${activeBarIndex}-${label}`}
                         style={[styles.beatCell, { width: cellSize }]}
                       >
                         <Text style={styles.beatLabel}>{label}</Text>
@@ -1161,13 +1242,13 @@ function RowEditor({
                   </View>
                   <View style={[styles.barBlock, styles.mobileBarBlock, { width: barWidth, padding: barPadding }]}>
                     <View style={[styles.slotRow, { gap: cellGap }]}>
-                      {(activeMobileBar.cells[stringName] ?? []).map((cellValue, slotIndex) => (
+                      {(selectedBar.cells[stringName] ?? []).map((cellValue, slotIndex) => (
                         <Pressable
-                          key={`${sectionId}-mobile-cell-${activeGlobalBarIndex}-${stringName}-${slotIndex}`}
+                          key={`${sectionId}-mobile-cell-${selectedGlobalBarIndex}-${stringName}-${slotIndex}`}
                           onPress={() =>
                             setSelectedCell({
-                              globalBarIndex: activeGlobalBarIndex,
-                              rowBarIndex: activeMobileBarIndex,
+                              globalBarIndex: selectedGlobalBarIndex,
+                              rowBarIndex: activeBarIndex,
                               stringName,
                               stringIndex,
                               slotIndex,
@@ -1176,7 +1257,7 @@ function RowEditor({
                           style={[
                             styles.slotButton,
                             { width: cellSize, minHeight: cellSize + 2 },
-                            selectedCell?.globalBarIndex === activeGlobalBarIndex &&
+                            selectedCell?.globalBarIndex === selectedGlobalBarIndex &&
                             selectedCell?.stringName === stringName &&
                             selectedCell?.slotIndex === slotIndex &&
                             styles.slotButtonActive,
@@ -1272,15 +1353,11 @@ function RowEditor({
             </View>
           ) : null}
 
-          {activeMobileBar ? (
-            <View style={[styles.barBlock, styles.mobileBarActionsBlock, { padding: barPadding }]}>
-              {renderBarActions(activeMobileBar, activeGlobalBarIndex)}
-              <View style={styles.barFooterSpacer} />
-            </View>
-          ) : null}
+          {selectedBar ? <View style={styles.barFooterSpacer} /> : null}
         </View>
       ) : (
         <ScrollView
+          ref={gridScrollRef}
           horizontal
           nestedScrollEnabled
           directionalLockEnabled
@@ -1294,9 +1371,15 @@ function RowEditor({
             <View style={styles.gridRow}>
               <View style={styles.labelCell} />
               {row.bars.map((_, rowBarIndex) => (
-                <View
+                <Pressable
                   key={`${sectionId}-row-head-${rowBarIndex}`}
-                  style={[styles.barBlock, { width: barWidth, padding: barPadding }]}
+                  onPress={() => selectBar(rowBarIndex)}
+                  style={[
+                    styles.barBlock,
+                    rowBarIndex === activeBarIndex && styles.barBlockSelected,
+                    rowBarIndex !== activeBarIndex && styles.barBlockSelectable,
+                    { width: barWidth, padding: barPadding },
+                  ]}
                 >
                   <Text style={styles.barBlockTitle}>Bar {row.startBarIndex + rowBarIndex + 1}</Text>
                   <View style={[styles.beatRow, { gap: cellGap }]}>
@@ -1309,7 +1392,7 @@ function RowEditor({
                       </View>
                     ))}
                   </View>
-                </View>
+                </Pressable>
               ))}
             </View>
 
@@ -1328,7 +1411,11 @@ function RowEditor({
                   return (
                     <View
                       key={`${sectionId}-bar-grid-${globalBarIndex}-${stringName}`}
-                      style={[styles.barBlock, { width: barWidth, padding: barPadding }]}
+                      style={[
+                        styles.barBlock,
+                        rowBarIndex === activeBarIndex && styles.barBlockSelected,
+                        { width: barWidth, padding: barPadding },
+                      ]}
                     >
                       <View style={[styles.slotRow, { gap: cellGap }]}>
                         {(bar.cells[stringName] ?? []).map((cellValue, slotIndex) => {
@@ -1349,6 +1436,7 @@ function RowEditor({
                               onChangeText={(value) =>
                                 onCellChange(globalBarIndex, stringName, slotIndex, value)
                               }
+                              onFocus={() => selectBar(rowBarIndex)}
                               onKeyPress={(event) =>
                                 onCellKeyPress(
                                   event,
@@ -1376,41 +1464,15 @@ function RowEditor({
               </View>
             ))}
 
-            <View style={styles.gridRow}>
-              <View style={styles.labelCell} />
-              {row.bars.map((bar, rowBarIndex) => {
-                const globalBarIndex = row.startBarIndex + rowBarIndex;
-
-                return (
-                  <View
-                    key={`${sectionId}-bar-actions-${globalBarIndex}`}
-                    style={[styles.barBlock, { width: barWidth, padding: barPadding }]}
-                  >
-                    {renderBarActions(bar, globalBarIndex)}
-                    <View style={styles.barFooterSpacer} />
-                  </View>
-                );
-              })}
-            </View>
           </View>
         </ScrollView>
       )}
 
-      {useSimpleAnnotationFields ? (
-        <Field
-          label="After Row"
-          value={row.annotation.afterText}
-          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'afterText', value)}
-          multiline
-          minHeight={72}
-        />
-      ) : (
-        <AnnotationField
-          label="After Row"
-          value={row.annotation.afterText}
-          onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'afterText', value)}
-        />
-      )}
+      <AnnotationField
+        label="After Row"
+        value={row.annotation.afterText}
+        onChangeText={(value) => onRowAnnotationChange(row.rowIndex, 'afterText', value)}
+      />
     </View>
   );
 }
@@ -1473,10 +1535,12 @@ function RowBarCountField({
   label,
   value,
   onCommit,
+  inline = false,
 }: {
   label: string;
   value: number;
   onCommit: (value: string) => void;
+  inline?: boolean;
 }) {
   const [draftValue, setDraftValue] = useState(String(value));
 
@@ -1494,6 +1558,25 @@ function RowBarCountField({
       onCommit(normalizedValue);
     }
   };
+
+  if (inline) {
+    return (
+      <View style={styles.rowBarInlineField}>
+        <Text style={styles.rowBarInlineLabel}>{label}</Text>
+        <TextInput
+          value={draftValue}
+          onChangeText={(nextValue) => setDraftValue(nextValue.replace(/[^0-9]/g, '').slice(0, 1))}
+          keyboardType="numeric"
+          maxLength={1}
+          selectTextOnFocus
+          onBlur={commitDraft}
+          onSubmitEditing={commitDraft}
+          style={[styles.input, styles.compactInput, styles.rowBarInlineInput]}
+          placeholderTextColor={palette.textMuted}
+        />
+      </View>
+    );
+  }
 
   return (
     <Field
@@ -1519,82 +1602,26 @@ function AnnotationField({
   value: string;
   onChangeText: (value: string) => void;
 }) {
-  const controls = parseAnnotationControls(value);
-
   return (
     <View style={styles.field}>
-      <View style={styles.annotationHeader}>
-        <Text style={styles.label}>{label}</Text>
-        <View style={styles.annotationControls}>
-          <FormatToggle
-            label="L"
-            active={controls.align === 'left'}
-            onPress={() => onChangeText(withAnnotationStyle(value, { align: 'left' }))}
-          />
-          <FormatToggle
-            label="C"
-            active={controls.align === 'center'}
-            onPress={() => onChangeText(withAnnotationStyle(value, { align: 'center' }))}
-          />
-          <FormatToggle
-            label="R"
-            active={controls.align === 'right'}
-            onPress={() => onChangeText(withAnnotationStyle(value, { align: 'right' }))}
-          />
-          <FormatToggle
-            label="B"
-            active={controls.bold}
-            onPress={() =>
-              onChangeText(
-                withAnnotationStyle(value, {
-                  bold: !controls.bold,
-                  underline: controls.bold ? controls.underline : false,
-                }),
-              )
-            }
-          />
-          <FormatToggle
-            label="U"
-            active={controls.underline}
-            onPress={() =>
-              onChangeText(
-                withAnnotationStyle(value, {
-                  underline: !controls.underline,
-                  bold: controls.underline ? controls.bold : false,
-                }),
-              )
-            }
-          />
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.annotationCard}>
+        <View style={styles.annotationToolbar}>
+          <Text style={styles.annotationHint}>
+            Use leading spaces for placement. Use `<b>...</b>` and `<u>...</u>` for style.
+          </Text>
         </View>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          multiline
+          textAlignVertical="top"
+          style={[styles.input, styles.annotationInput]}
+          placeholder="e.g.   <b>Hold through bar 2</b>"
+          placeholderTextColor={palette.textMuted}
+        />
       </View>
-      <TextInput
-        value={controls.plainText}
-        onChangeText={(nextText) => onChangeText(withAnnotationText(value, nextText))}
-        multiline
-        textAlignVertical="top"
-        style={[styles.input, styles.annotationInput]}
-        placeholderTextColor={palette.textMuted}
-      />
     </View>
-  );
-}
-
-function FormatToggle({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Text
-      onPress={onPress}
-      style={[styles.formatToggle, active && styles.formatToggleActive]}
-    >
-      {label}
-    </Text>
   );
 }
 
@@ -1799,33 +1826,21 @@ const styles = StyleSheet.create({
   rowMetaCountField: {
     width: 72,
   },
-  annotationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  annotationCard: {
     gap: 10,
-  },
-  annotationControls: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  formatToggle: {
-    minWidth: 28,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
     borderWidth: 1,
     borderColor: palette.border,
-    backgroundColor: '#f8fafc',
-    color: palette.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: '#ffffff',
   },
-  formatToggleActive: {
-    backgroundColor: palette.primaryMuted,
-    borderColor: palette.primary,
-    color: palette.primary,
+  annotationToolbar: {
+    gap: 10,
+  },
+  annotationHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: palette.textMuted,
   },
   compactInput: {
     minHeight: 40,
@@ -1889,10 +1904,76 @@ const styles = StyleSheet.create({
     color: palette.textMuted,
     marginTop: 3,
   },
+  activeBarHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: palette.primary,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  barSelectorPanel: {
+    gap: 8,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 10,
+  },
+  barSelectorTitle: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    color: palette.textMuted,
+    fontWeight: '700',
+  },
+  barSelectorHint: {
+    fontSize: 12,
+    color: palette.textMuted,
+  },
+  barSelectorControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  barStepButton: {
+    minHeight: 36,
+    minWidth: 40,
+    paddingHorizontal: 10,
+  },
+  barSelectorPills: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  barSelectorPill: {
+    minWidth: 40,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  barSelectorPillActive: {
+    borderColor: palette.primary,
+    backgroundColor: '#e0f3ef',
+  },
+  barSelectorPillLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: palette.text,
+  },
+  barSelectorPillLabelActive: {
+    color: palette.primary,
+  },
   activeRowActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+    alignItems: 'flex-end',
   },
   activeMetaFields: {
     flexDirection: 'row',
@@ -1903,7 +1984,7 @@ const styles = StyleSheet.create({
     width: 88,
   },
   annotationInput: {
-    minHeight: 58,
+    minHeight: 64,
   },
   grid: {
     gap: 8,
@@ -1971,6 +2052,15 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 12,
     backgroundColor: '#eef2f7',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  barBlockSelected: {
+    borderColor: palette.accent,
+    backgroundColor: '#fff7ed',
+  },
+  barBlockSelectable: {
+    borderColor: palette.border,
   },
   mobileBarBlock: {
     maxWidth: '100%',
@@ -2089,15 +2179,43 @@ const styles = StyleSheet.create({
   mobileBarActionsBlock: {
     width: '100%',
   },
+  barToolbarRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
+  barToolbarCountField: {
+    width: 104,
+  },
   barFooter: {
+    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     width: '100%',
     alignSelf: 'stretch',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    gap: 6,
   },
   barFooterButton: {
     minHeight: 34,
+  },
+  rowBarInlineField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 34,
+  },
+  rowBarInlineLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  rowBarInlineInput: {
+    width: 42,
+    minHeight: 34,
+    paddingHorizontal: 8,
+    textAlign: 'center',
   },
   barFooterSpacer: {
     height: 2,

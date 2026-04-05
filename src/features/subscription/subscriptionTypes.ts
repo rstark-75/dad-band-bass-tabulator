@@ -6,12 +6,14 @@ export interface SubscriptionCapabilities {
   maxSongs: number | null;
   maxSetlists: number | null;
   maxCommunitySongs: number | null;
+  maxCommunitySaves: number | null;
   svgEnabled: boolean;
 }
 
 export interface SubscriptionSnapshot {
   tier: SubscriptionTier;
   status: SubscriptionStatus;
+  communitySongsSaved: number;
   planCode: string | null;
   currency: BillingCurrency | null;
   unitAmountMinor: number | null;
@@ -39,3 +41,8 @@ export interface SubscriptionPricing {
 }
 
 export type UpgradeTrigger = 'SONG_LIMIT' | 'SETLIST_LIMIT' | 'SVG_MODE' | 'COMMUNITY_SAVE' | 'PDF_EXPORT';
+
+export interface SubscriptionCapabilityDefaults {
+  free: SubscriptionCapabilities;
+  pro: SubscriptionCapabilities;
+}

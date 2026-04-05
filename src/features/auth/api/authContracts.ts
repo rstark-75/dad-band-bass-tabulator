@@ -1,7 +1,9 @@
 export interface UserDto {
   id: string;
+  userId: string;
   email: string;
   displayName: string;
+  avatarUrl?: string | null;
   subscriptionTier?: 'FREE' | 'PRO';
 }
 
@@ -11,12 +13,16 @@ export interface SessionResponse {
 }
 
 export interface StartAuthRequest {
-  email: string;
+  userId: string;
+  email?: string;
+  mode: 'LOGIN' | 'REGISTER';
+  avatarUrl?: string;
 }
 
 export interface StartAuthResponse {
   status: 'EMAIL_SENT';
   maskedEmail: string;
+  email?: string;
   nextAllowedResendAt?: string | null;
 }
 
@@ -25,7 +31,8 @@ export interface VerifyLinkRequest {
 }
 
 export interface VerifyCodeRequest {
-  email: string;
+  userId: string;
+  email?: string;
   code: string;
 }
 

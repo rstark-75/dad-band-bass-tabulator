@@ -7,6 +7,7 @@ import { palette } from '../../../constants/colors';
 import { brandDisplayFontFamily } from '../../../constants/typography';
 import { useAuth } from '../state/useAuth';
 import { sanitizeCode } from '../utils/codeInput';
+import { isValidEmail } from '../utils/email';
 
 const getSecondsUntil = (isoDate?: string | null): number => {
   if (!isoDate) {
@@ -34,14 +35,16 @@ export function CheckEmailScreen() {
   } = useAuth();
   const checkEmailState = authState.type === 'CHECK_EMAIL' ? authState : null;
   const [code, setCode] = useState('');
+  const [email, setEmail] = useState(checkEmailState?.email ?? '');
   const [secondsRemaining, setSecondsRemaining] = useState(
     getSecondsUntil(checkEmailState?.nextAllowedResendAt),
   );
 
   useEffect(() => {
     setCode('');
+    setEmail(checkEmailState?.email ?? '');
     setSecondsRemaining(getSecondsUntil(checkEmailState?.nextAllowedResendAt));
-  }, [checkEmailState?.email, checkEmailState?.nextAllowedResendAt]);
+  }, [checkEmailState?.email, checkEmailState?.nextAllowedResendAt, checkEmailState?.userId]);
 
   useEffect(() => {
     if (!checkEmailState?.nextAllowedResendAt) {
@@ -59,7 +62,12 @@ export function CheckEmailScreen() {
   }, [checkEmailState?.nextAllowedResendAt]);
 
   const cleanedCode = useMemo(() => sanitizeCode(code), [code]);
-  const canVerify = cleanedCode.length === 6;
+  const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
+  const needsEmailInput = (checkEmailState?.email ?? '').trim().length === 0;
+  const requiresEmailForVerify =
+    (checkEmailState?.mode ?? 'LOGIN') === 'REGISTER' && needsEmailInput;
+  const emailIsValid = normalizedEmail.length > 0 && isValidEmail(normalizedEmail);
+  const canVerify = cleanedCode.length === 6 && (!requiresEmailForVerify || emailIsValid);
   const isVerifying = loadingAction === 'verifyCode';
   const isResending = loadingAction === 'resendAuth';
   const canResend = secondsRemaining <= 0 && !isResending;
@@ -68,17 +76,65 @@ export function CheckEmailScreen() {
     return null;
   }
 
+  const isRegisterChallenge = checkEmailState.mode === 'REGISTER';
+  const titleText = isRegisterChallenge ? 'Confirm your new account' : 'Check your email';
+  const bodyText = isRegisterChallenge
+    ? `We sent a registration link and a backup code to ${checkEmailState.maskedEmail}.`
+    : `We sent a sign-in link and a backup code to ${checkEmailState.maskedEmail}.`;
+  const verifyButtonText = isVerifying
+    ? 'Verifying...'
+    : isRegisterChallenge
+      ? 'Complete registration'
+      : 'Verify code';
+  const switchAccountText = isRegisterChallenge ? 'Back to Register' : 'Use a different account';
+
   const submitCode = async () => {
-    await verifyCode(checkEmailState.email, cleanedCode);
+    await verifyCode({
+      rawUserId: checkEmailState.userId,
+      rawEmail: checkEmailState.email || (emailIsValid ? normalizedEmail : undefined),
+      rawCode: cleanedCode,
+    });
   };
 
   return (
     <ScreenContainer scroll={false} contentStyle={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>Check your email</Text>
-        <Text style={styles.body}>
-          We sent a sign-in link and a backup code to {checkEmailState.maskedEmail}.
+        <Text style={styles.title}>{titleText}</Text>
+        <Text style={styles.body}>{bodyText}</Text>
+        <Text style={styles.accountMeta}>
+          {isRegisterChallenge ? 'Registering' : 'Signing in'} as {checkEmailState.userId}
         </Text>
+
+        {needsEmailInput ? (
+          <View style={styles.field}>
+            <Text style={styles.label}>Linked email</Text>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              placeholder="you@example.com"
+              placeholderTextColor="#94a3b8"
+              style={styles.emailInput}
+              value={email}
+              onChangeText={(value) => {
+                setEmail(value);
+                if (errorMessage) {
+                  clearError();
+                }
+              }}
+              onSubmitEditing={() => {
+                if (canVerify && !isVerifying) {
+                  void submitCode();
+                }
+              }}
+              returnKeyType="next"
+            />
+            {(checkEmailState.mode === 'LOGIN' && !emailIsValid && normalizedEmail.length > 0) ? (
+              <Text style={styles.helperText}>Use a valid linked email format.</Text>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.field}>
           <Text style={styles.label}>6-digit backup code</Text>
@@ -109,7 +165,7 @@ export function CheckEmailScreen() {
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
         <PrimaryButton
-          label={isVerifying ? 'Verifying...' : 'Verify code'}
+          label={verifyButtonText}
           onPress={() => {
             if (!isVerifying) {
               void submitCode();
@@ -137,7 +193,7 @@ export function CheckEmailScreen() {
           />
           <PrimaryButton
             variant="ghost"
-            label="Use a different email"
+            label={switchAccountText}
             onPress={useDifferentEmail}
           />
         </View>
@@ -173,6 +229,11 @@ const styles = StyleSheet.create({
     color: palette.textMuted,
     lineHeight: 22,
   },
+  accountMeta: {
+    fontSize: 13,
+    color: palette.primary,
+    fontWeight: '700',
+  },
   field: {
     gap: 8,
   },
@@ -193,6 +254,22 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
+  },
+  emailInput: {
+    minHeight: 52,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 14,
+    color: palette.text,
+    fontSize: 16,
+  },
+  helperText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: palette.textMuted,
+    fontWeight: '600',
   },
   secondaryActions: {
     gap: 8,

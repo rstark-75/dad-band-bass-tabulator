@@ -1,5 +1,5 @@
 import { SLOTS_PER_BAR } from '../src/utils/tabLayout.ts';
-import { getNoteRenderStyle } from '../src/utils/tabPreviewTimeline.ts';
+import { getNoteRenderStyle, isNumericTabValue } from '../src/utils/tabPreviewTimeline.ts';
 
 const stringNames = ['G', 'D'];
 
@@ -76,6 +76,24 @@ expectStyle(
   'note with nine empty slots (>4 beats) becomes hold4',
   [makeBar({ G: ['7'] }), makeBar({ G: [undefined, undefined, '10'] })],
   'hold4',
+);
+
+runTest('padded single-digit slots are treated as numeric notes', () => {
+  if (!isNumericTabValue('7-')) {
+    throw new Error('Expected 7- to be treated as numeric');
+  }
+});
+
+runTest('symbol slots are not treated as numeric notes', () => {
+  if (isNumericTabValue('/') || isNumericTabValue('\\') || isNumericTabValue('.') || isNumericTabValue('-')) {
+    throw new Error('Expected symbol slots to be treated as non-numeric');
+  }
+});
+
+expectStyle(
+  'padded note value still produces beat timing',
+  [makeBar({ G: ['7-', undefined, '9-'] })],
+  'beat',
 );
 
 console.log('note render style tests passed');

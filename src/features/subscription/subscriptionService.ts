@@ -2,11 +2,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { BassTabApi, createBassTabApiFromEnv } from '../../api';
 import {
+  SubscriptionCapabilityDefaultsDto,
   SubscriptionPricingDto,
   SubscriptionSnapshotDto,
 } from '../../api/contracts';
 import {
   BillingCurrency,
+  SubscriptionCapabilityDefaults,
   SubscriptionPricing,
   SubscriptionSnapshot,
 } from './subscriptionTypes';
@@ -29,8 +31,10 @@ const defaultFreeSnapshot: SubscriptionSnapshot = {
     maxSongs: 10,
     maxSetlists: 1,
     maxCommunitySongs: 2,
+    maxCommunitySaves: 2,
     svgEnabled: false,
   },
+  communitySongsSaved: 0,
 };
 
 const defaultPricing: SubscriptionPricing = {
@@ -51,6 +55,7 @@ const defaultPricing: SubscriptionPricing = {
 const mapSnapshot = (snapshot: SubscriptionSnapshotDto): SubscriptionSnapshot => ({
   tier: snapshot.tier,
   status: snapshot.status,
+  communitySongsSaved: snapshot.communitySongsSaved,
   planCode: snapshot.planCode,
   currency: snapshot.currency,
   unitAmountMinor: snapshot.unitAmountMinor,
@@ -62,15 +67,16 @@ const mapSnapshot = (snapshot: SubscriptionSnapshotDto): SubscriptionSnapshot =>
     maxSongs: snapshot.capabilities.maxSongs,
     maxSetlists: snapshot.capabilities.maxSetlists,
     maxCommunitySongs: snapshot.capabilities.maxCommunitySongs,
+    maxCommunitySaves: snapshot.capabilities.maxCommunitySaves,
     svgEnabled: snapshot.capabilities.svgEnabled,
   },
 });
 
 const mapPricing = (pricing: SubscriptionPricingDto): SubscriptionPricing => ({
   plans: pricing.plans.map((plan) => ({
-    plan: plan.plan,
-    label: plan.label,
-    interval: plan.interval,
+    plan: plan.code,
+    label: plan.displayName,
+    interval: plan.billingInterval,
     prices: plan.prices.map((price) => ({
       currency: price.currency,
       unitAmountMinor: price.unitAmountMinor,
@@ -78,9 +84,34 @@ const mapPricing = (pricing: SubscriptionPricingDto): SubscriptionPricing => ({
   })),
 });
 
+const defaultCapabilityDefaults: SubscriptionCapabilityDefaults = {
+  free: defaultFreeSnapshot.capabilities,
+  pro: defaultFreeSnapshot.capabilities,
+};
+
+const mapCapabilityDefaults = (
+  defaults: SubscriptionCapabilityDefaultsDto,
+): SubscriptionCapabilityDefaults => ({
+  free: {
+    maxSongs: defaults.free.maxSongs,
+    maxSetlists: defaults.free.maxSetlists,
+    maxCommunitySongs: defaults.free.maxCommunitySongs,
+    maxCommunitySaves: defaults.free.maxCommunitySaves,
+    svgEnabled: defaults.free.svgEnabled,
+  },
+  pro: {
+    maxSongs: defaults.pro.maxSongs,
+    maxSetlists: defaults.pro.maxSetlists,
+    maxCommunitySongs: defaults.pro.maxCommunitySongs,
+    maxCommunitySaves: defaults.pro.maxCommunitySaves,
+    svgEnabled: defaults.pro.svgEnabled,
+  },
+});
+
 export interface SubscriptionService {
   loadSnapshot: () => Promise<SubscriptionSnapshot>;
   loadPricing: () => Promise<SubscriptionPricing>;
+  loadCapabilityDefaults: () => Promise<SubscriptionCapabilityDefaults>;
   upgradeToPro: (currency?: BillingCurrency) => Promise<SubscriptionSnapshot>;
 }
 
@@ -88,32 +119,23 @@ class HybridSubscriptionService implements SubscriptionService {
   private readonly api: BassTabApi | null = createBassTabApiFromEnv();
 
   async loadSnapshot(): Promise<SubscriptionSnapshot> {
-    if (this.api) {
-      return mapSnapshot(await this.api.getSubscription());
+    if (!this.api) {
+      try {
+        await AsyncStorage.removeItem(storageKeys.tier);
+      } catch (error) {
+        console.warn('Subscription tier cleanup failed', error);
+      }
+
+      return defaultFreeSnapshot;
     }
 
     try {
-      const storedTier = await AsyncStorage.getItem(storageKeys.tier);
-
-      if (storedTier === 'PRO') {
-        return {
-          ...defaultFreeSnapshot,
-          tier: 'PRO',
-          status: 'ACTIVE',
-          planCode: 'PRO_MONTHLY',
-          capabilities: {
-            maxSongs: null,
-            maxSetlists: null,
-            maxCommunitySongs: null,
-            svgEnabled: true,
-          },
-        };
-      }
+      await AsyncStorage.removeItem(storageKeys.tier);
     } catch (error) {
-      console.warn('Subscription tier hydrate failed', error);
+      console.warn('Subscription tier cleanup failed', error);
     }
 
-    return defaultFreeSnapshot;
+    return mapSnapshot(await this.api.getSubscription());
   }
 
   async loadPricing(): Promise<SubscriptionPricing> {
@@ -124,36 +146,25 @@ class HybridSubscriptionService implements SubscriptionService {
     return defaultPricing;
   }
 
-  async upgradeToPro(currency: BillingCurrency = 'GBP'): Promise<SubscriptionSnapshot> {
+  async loadCapabilityDefaults(): Promise<SubscriptionCapabilityDefaults> {
     if (this.api) {
-      const upgraded = await this.api.mockUpgrade({
-        planCode: 'PRO_MONTHLY',
-        currency,
-      });
-
-      return mapSnapshot(upgraded);
+      return mapCapabilityDefaults(await this.api.getSubscriptionCapabilityDefaults());
     }
 
-    try {
-      await AsyncStorage.setItem(storageKeys.tier, 'PRO');
-    } catch (error) {
-      console.warn('Subscription tier persist failed', error);
+    return defaultCapabilityDefaults;
+  }
+
+  async upgradeToPro(currency: BillingCurrency = 'GBP'): Promise<SubscriptionSnapshot> {
+    if (!this.api) {
+      throw new Error('Subscription upgrade requires backend API configuration.');
     }
 
-    return {
-      ...defaultFreeSnapshot,
-      tier: 'PRO',
-      status: 'ACTIVE',
+    const upgraded = await this.api.mockUpgrade({
       planCode: 'PRO_MONTHLY',
       currency,
-      unitAmountMinor: 499,
-      capabilities: {
-        maxSongs: null,
-        maxSetlists: null,
-        maxCommunitySongs: null,
-        svgEnabled: true,
-      },
-    };
+    });
+
+    return mapSnapshot(upgraded);
   }
 }
 

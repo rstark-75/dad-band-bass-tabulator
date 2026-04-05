@@ -1,16 +1,19 @@
 import type { UserDto } from '../api/authContracts.ts';
-import type { AuthLoadingAction, AuthStoreState } from './authTypes.ts';
+import type { AuthIntent, AuthLoadingAction, AuthStoreState } from './authTypes.ts';
 
 export type AuthEvent =
   | { type: 'setLoading'; loadingAction: AuthLoadingAction | null }
   | { type: 'setError'; errorMessage: string | null }
-  | { type: 'setDraftEmail'; email: string }
+  | { type: 'setDraftSignIn'; userId: string; email: string; avatarUrl?: string; intent?: AuthIntent }
   | { type: 'setRestoring' }
   | { type: 'setUnauthenticated' }
   | {
     type: 'setCheckEmail';
+    userId: string;
     email: string;
     maskedEmail: string;
+    mode: AuthIntent;
+    avatarUrl?: string;
     nextAllowedResendAt?: string | null;
   }
   | { type: 'setAuthenticated'; user: UserDto };
@@ -30,10 +33,13 @@ export const authReducer = (
         ...state,
         errorMessage: event.errorMessage,
       };
-    case 'setDraftEmail':
+    case 'setDraftSignIn':
       return {
         ...state,
+        draftUserId: event.userId,
         draftEmail: event.email,
+        draftAvatarUrl: event.avatarUrl ?? '',
+        draftIntent: event.intent ?? state.draftIntent,
       };
     case 'setRestoring':
       return {
@@ -50,8 +56,11 @@ export const authReducer = (
         ...state,
         authState: {
           type: 'CHECK_EMAIL',
+          userId: event.userId,
           email: event.email,
           maskedEmail: event.maskedEmail,
+          mode: event.mode,
+          avatarUrl: event.avatarUrl,
           nextAllowedResendAt: event.nextAllowedResendAt,
         },
       };

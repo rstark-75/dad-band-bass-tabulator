@@ -34,6 +34,10 @@ const vibePillPool = [
   'Played it right eventually',
   'That count-in was ambitious',
   'Held together by groove',
+  'Bass solos optional',
+  'Keep calm and carry on',
+  'None noticed, its fine',
+  'Was the amp on?',
 ];
 
 interface WelcomeExperienceProps {

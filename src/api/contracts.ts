@@ -8,8 +8,6 @@ export interface SongMetadataDto {
   feelNote: string;
   tuning: string;
   updatedAt: string;
-  releasedToCommunity?: boolean;
-  communityReleasedAt?: string | null;
 }
 
 export interface SongChartDto {
@@ -61,6 +59,7 @@ export interface SubscriptionCapabilitiesDto {
   maxSongs: number | null;
   maxSetlists: number | null;
   maxCommunitySongs: number | null;
+  maxCommunitySaves: number | null;
   svgEnabled: boolean;
 }
 
@@ -75,6 +74,7 @@ export interface SubscriptionSnapshotDto {
   trialEnd: string | null;
   cancelAtPeriodEnd: boolean;
   capabilities: SubscriptionCapabilitiesDto;
+  communitySongsSaved: number;
 }
 
 export interface SubscriptionPriceDto {
@@ -83,9 +83,9 @@ export interface SubscriptionPriceDto {
 }
 
 export interface SubscriptionPlanDto {
-  plan: string;
-  label: string;
-  interval: string;
+  code: string;
+  displayName: string;
+  billingInterval: string;
   prices: SubscriptionPriceDto[];
 }
 
@@ -93,13 +93,55 @@ export interface SubscriptionPricingDto {
   plans: SubscriptionPlanDto[];
 }
 
+export interface SubscriptionCapabilityDefaultsDto {
+  free: SubscriptionCapabilitiesDto;
+  pro: SubscriptionCapabilitiesDto;
+}
+
 export interface MockUpgradeRequestDto {
   planCode: 'PRO_MONTHLY';
   currency: BillingCurrencyDto;
 }
 
+export type PublishedSongStatusDto = 'PUBLISHED' | 'UNLISTED' | 'MODERATION_HIDDEN';
+
+export interface CommunitySongAuthorDto {
+  userId: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}
+
+export type CommunitySongVoteDirectionDto = 'UP' | 'DOWN';
+
+export interface CommunitySongVotesDto {
+  upVotes: number;
+  downVotes: number;
+  currentUserVote: CommunitySongVoteDirectionDto | null;
+}
+
+export interface CommunitySongCardDto {
+  id: string;
+  publishedSongId?: string | null;
+  sourceSongId?: string | null;
+  title: string;
+  artist: string;
+  key?: string | null;
+  tuning?: string | null;
+  feelNote?: string | null;
+  author?: CommunitySongAuthorDto;
+  votes: CommunitySongVotesDto;
+  publishedAt: string;
+  updatedAt: string;
+  status?: PublishedSongStatusDto;
+}
+
+export interface CommunitySongDetailDto extends CommunitySongCardDto {
+  chart: SongChartDto;
+}
+
 export interface CommunitySavedSongDto {
-  communitySongId: string;
+  publishedSongId: string;
+  communitySongsSaved: number;
 }
 
 export interface SaveCommunitySongRequestDto {
@@ -154,9 +196,6 @@ const isSongMetadataDto = (value: unknown): value is SongMetadataDto => {
     return false;
   }
 
-  const releasedToCommunity = value.releasedToCommunity;
-  const communityReleasedAt = value.communityReleasedAt;
-
   return (
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
@@ -164,11 +203,7 @@ const isSongMetadataDto = (value: unknown): value is SongMetadataDto => {
     typeof value.key === 'string' &&
     typeof value.feelNote === 'string' &&
     typeof value.tuning === 'string' &&
-    typeof value.updatedAt === 'string' &&
-    (typeof releasedToCommunity === 'undefined' || typeof releasedToCommunity === 'boolean') &&
-    (typeof communityReleasedAt === 'undefined' ||
-      typeof communityReleasedAt === 'string' ||
-      communityReleasedAt === null)
+    typeof value.updatedAt === 'string'
   );
 };
 
@@ -191,6 +226,8 @@ const isPlaylistDto = (value: unknown): value is PlaylistDto => {
 const subscriptionTiers: SubscriptionTierDto[] = ['FREE', 'PRO'];
 const subscriptionStatuses: SubscriptionStatusDto[] = ['FREE', 'TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELLED', 'EXPIRED'];
 const billingCurrencies: BillingCurrencyDto[] = ['GBP', 'USD', 'EUR'];
+const publishedSongStatuses: PublishedSongStatusDto[] = ['PUBLISHED', 'UNLISTED', 'MODERATION_HIDDEN'];
+const communityVoteDirections: CommunitySongVoteDirectionDto[] = ['UP', 'DOWN'];
 
 const isNullableString = (value: unknown): value is string | null =>
   typeof value === 'string' || value === null;
@@ -210,8 +247,28 @@ const isSubscriptionCapabilitiesDto = (value: unknown): value is SubscriptionCap
     isNullableNumber(value.maxSongs) &&
     isNullableNumber(value.maxSetlists) &&
     isNullableNumber(value.maxCommunitySongs) &&
+    isNullableNumber(value.maxCommunitySaves) &&
     typeof value.svgEnabled === 'boolean'
   );
+};
+
+const isSubscriptionCapabilityDefaultsDto = (value: unknown): value is SubscriptionCapabilityDefaultsDto => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isSubscriptionCapabilitiesDto(value.free) &&
+    isSubscriptionCapabilitiesDto(value.pro)
+  );
+};
+
+export const parseSubscriptionCapabilityDefaultsDto = (value: unknown): SubscriptionCapabilityDefaultsDto => {
+  if (!isSubscriptionCapabilityDefaultsDto(value)) {
+    throw new Error('Invalid subscription capability defaults response payload.');
+  }
+
+  return value;
 };
 
 const isSubscriptionSnapshotDto = (value: unknown): value is SubscriptionSnapshotDto => {
@@ -229,49 +286,233 @@ const isSubscriptionSnapshotDto = (value: unknown): value is SubscriptionSnapsho
     isNullableString(value.currentPeriodEnd) &&
     isNullableString(value.trialEnd) &&
     typeof value.cancelAtPeriodEnd === 'boolean' &&
-    isSubscriptionCapabilitiesDto(value.capabilities)
+    isSubscriptionCapabilitiesDto(value.capabilities) &&
+    typeof value.communitySongsSaved === 'number'
   );
 };
 
-const isSubscriptionPriceDto = (value: unknown): value is SubscriptionPriceDto => {
+const isNullableSongMeta = (value: unknown): value is string | null | undefined =>
+  typeof value === 'undefined' || typeof value === 'string' || value === null;
+
+const isNullableCommunityVoteDirectionDto = (
+  value: unknown,
+): value is CommunitySongVoteDirectionDto | null | undefined =>
+  typeof value === 'undefined' ||
+  value === null ||
+  communityVoteDirections.includes(value as CommunitySongVoteDirectionDto);
+
+const toCommunitySongVotesDto = (value: unknown): CommunitySongVotesDto => {
+  if (!isRecord(value)) {
+    return {
+      upVotes: 0,
+      downVotes: 0,
+      currentUserVote: null,
+    };
+  }
+
+  const upVotes = Number.isFinite(value.upVotes) ? Number(value.upVotes) : 0;
+  const downVotes = Number.isFinite(value.downVotes) ? Number(value.downVotes) : 0;
+  const currentUserVote = isNullableCommunityVoteDirectionDto(value.currentUserVote)
+    ? value.currentUserVote ?? null
+    : null;
+
+  return {
+    upVotes: Math.max(0, Math.floor(upVotes)),
+    downVotes: Math.max(0, Math.floor(downVotes)),
+    currentUserVote,
+  };
+};
+
+const isCommunitySongAuthorDto = (value: unknown): value is CommunitySongAuthorDto => {
   if (!isRecord(value)) {
     return false;
   }
 
   return (
-    billingCurrencies.includes(value.currency as BillingCurrencyDto) &&
-    Number.isInteger(value.unitAmountMinor)
+    typeof value.userId === 'string' &&
+    isNullableString(value.displayName) &&
+    isNullableString(value.avatarUrl)
   );
 };
 
-const isSubscriptionPlanDto = (value: unknown): value is SubscriptionPlanDto => {
+const isNullableCommunitySongAuthorDto = (value: unknown): value is CommunitySongAuthorDto | null | undefined =>
+  typeof value === 'undefined' || value === null || isCommunitySongAuthorDto(value);
+
+const toCommunitySongAuthorDto = (value: unknown): CommunitySongAuthorDto | undefined => {
   if (!isRecord(value)) {
-    return false;
+    return undefined;
   }
 
-  return (
-    typeof value.plan === 'string' &&
-    typeof value.label === 'string' &&
-    typeof value.interval === 'string' &&
-    Array.isArray(value.prices) &&
-    value.prices.every((price) => isSubscriptionPriceDto(price))
+  const userId =
+    typeof value.userId === 'string'
+      ? value.userId
+      : typeof value.id === 'string'
+        ? value.id
+        : typeof value.username === 'string'
+          ? value.username
+          : typeof value.handle === 'string'
+            ? value.handle
+            : null;
+
+  if (!userId) {
+    return undefined;
+  }
+
+  const displayName =
+    isNullableString(value.displayName)
+      ? value.displayName
+      : isNullableString(value.name)
+        ? value.name
+        : null;
+  const avatarUrl =
+    isNullableString(value.avatarUrl)
+      ? value.avatarUrl
+      : isNullableString(value.imageUrl)
+        ? value.imageUrl
+        : null;
+
+  return {
+    userId,
+    displayName: displayName ?? null,
+    avatarUrl: avatarUrl ?? null,
+  };
+};
+
+const toCommunitySongCardDto = (value: unknown): CommunitySongCardDto => {
+  if (!isRecord(value)) {
+    throw new Error('Invalid community catalog response payload.');
+  }
+
+  const rawId =
+    typeof value.id === 'string'
+      ? value.id
+      : typeof value.publishedSongId === 'string'
+        ? value.publishedSongId
+        : typeof value.sourceSongId === 'string'
+          ? value.sourceSongId
+          : null;
+
+  if (
+    !rawId ||
+    typeof value.title !== 'string' ||
+    typeof value.artist !== 'string' ||
+    !isNullableSongMeta(value.key) ||
+    !isNullableSongMeta(value.tuning) ||
+    !isNullableSongMeta(value.feelNote) ||
+    !isNullableCommunitySongAuthorDto(value.author) ||
+    typeof value.publishedAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    (typeof value.status !== 'undefined' &&
+      !publishedSongStatuses.includes(value.status as PublishedSongStatusDto))
+  ) {
+    throw new Error('Invalid community catalog response payload.');
+  }
+
+  const publishedSongId =
+    typeof value.publishedSongId === 'string'
+      ? value.publishedSongId
+      : typeof value.id === 'string'
+        ? value.id
+        : null;
+  const sourceSongId =
+    typeof value.sourceSongId === 'string'
+      ? value.sourceSongId
+      : typeof value.id === 'string'
+        ? value.id
+        : null;
+  const author =
+    toCommunitySongAuthorDto(value.author) ??
+    toCommunitySongAuthorDto({
+      userId: value.authorUserId,
+      displayName: value.authorDisplayName,
+      avatarUrl: value.authorAvatarUrl,
+    });
+  const votes = toCommunitySongVotesDto(
+    value.votes ??
+      ({
+        upVotes: value.upVotes,
+        downVotes: value.downVotes,
+        currentUserVote: value.currentUserVote,
+      } satisfies Record<string, unknown>),
   );
+
+  return {
+    id: rawId,
+    publishedSongId,
+    sourceSongId,
+    title: value.title,
+    artist: value.artist,
+    key: isNullableSongMeta(value.key) ? value.key : null,
+    tuning: isNullableSongMeta(value.tuning) ? value.tuning : null,
+    feelNote: isNullableSongMeta(value.feelNote) ? value.feelNote : null,
+    author,
+    votes,
+    publishedAt: value.publishedAt,
+    updatedAt: value.updatedAt,
+    status:
+      typeof value.status === 'string'
+        ? (value.status as PublishedSongStatusDto)
+        : undefined,
+  };
 };
 
-const isSubscriptionPricingDto = (value: unknown): value is SubscriptionPricingDto => {
+const toCommunitySongDetailDto = (value: unknown): CommunitySongDetailDto => {
   if (!isRecord(value)) {
-    return false;
+    throw new Error('Invalid community song response payload.');
   }
 
-  return Array.isArray(value.plans) && value.plans.every((plan) => isSubscriptionPlanDto(plan));
+  const chart = value.chart;
+
+  if (!isSongChartDto(chart)) {
+    throw new Error('Invalid community song response payload.');
+  }
+
+  const card = toCommunitySongCardDto(value);
+
+  return {
+    ...card,
+    chart,
+  };
 };
 
-const isCommunitySavedSongDto = (value: unknown): value is CommunitySavedSongDto => {
+const normalizeCommunitySongsSaved = (value: unknown): number => {
   if (!isRecord(value)) {
-    return false;
+    return 0;
   }
 
-  return typeof value.communitySongId === 'string';
+  const saved = value.communitySongsSaved;
+
+  if (typeof saved === 'number' && Number.isFinite(saved)) {
+    return Math.max(0, Math.floor(saved));
+  }
+
+  return 0;
+};
+
+const toCommunitySavedSongDto = (value: unknown): CommunitySavedSongDto => {
+  if (typeof value === 'string') {
+    return { publishedSongId: value, communitySongsSaved: 0 };
+  }
+
+  if (!isRecord(value)) {
+    throw new Error('Invalid community saved songs response payload.');
+  }
+
+  const publishedSongId =
+    typeof value.publishedSongId === 'string'
+      ? value.publishedSongId
+      : typeof value.communitySongId === 'string'
+        ? value.communitySongId
+        : null;
+
+  if (!publishedSongId) {
+    throw new Error('Invalid community saved songs response payload.');
+  }
+
+  return {
+    publishedSongId,
+    communitySongsSaved: normalizeCommunitySongsSaved(value),
+  };
 };
 
 export const parseSongMetadataListDto = (value: unknown): SongMetadataDto[] => {
@@ -322,22 +563,86 @@ export const parseSubscriptionSnapshotDto = (value: unknown): SubscriptionSnapsh
   return value;
 };
 
-export const parseSubscriptionPricingDto = (value: unknown): SubscriptionPricingDto => {
-  if (!isSubscriptionPricingDto(value)) {
+const isBillingCurrencyDto = (value: unknown): value is BillingCurrencyDto =>
+  typeof value === 'string' && billingCurrencies.includes(value as BillingCurrencyDto);
+
+const parseSubscriptionPriceDto = (value: unknown): SubscriptionPriceDto => {
+  if (!isRecord(value)) {
     throw new Error('Invalid subscription pricing response payload.');
   }
 
-  return value;
+  const currency = value.currency;
+  const amount = value.unitAmountMinor;
+
+  if (!isBillingCurrencyDto(currency) || typeof amount !== 'number') {
+    throw new Error('Invalid subscription pricing response payload.');
+  }
+
+  return {
+    currency,
+    unitAmountMinor: amount,
+  };
+};
+
+const parseSubscriptionPlanDto = (value: unknown): SubscriptionPlanDto => {
+  if (!isRecord(value)) {
+    throw new Error('Invalid subscription pricing response payload.');
+  }
+
+  if (
+    typeof value.code !== 'string' ||
+    typeof value.displayName !== 'string' ||
+    typeof value.billingInterval !== 'string' ||
+    !Array.isArray(value.prices)
+  ) {
+    throw new Error('Invalid subscription pricing response payload.');
+  }
+
+  return {
+    code: value.code,
+    displayName: value.displayName,
+    billingInterval: value.billingInterval,
+    prices: value.prices.map(parseSubscriptionPriceDto),
+  };
+};
+
+export const parseSubscriptionPricingDto = (value: unknown): SubscriptionPricingDto => {
+  if (!isRecord(value)) {
+    throw new Error('Invalid subscription pricing response payload.');
+  }
+
+  const plansValue = value.plans;
+
+  if (!Array.isArray(plansValue)) {
+    console.warn('Unexpected subscription pricing payload', value);
+    throw new Error('Invalid subscription pricing response payload.');
+  }
+
+  return {
+    plans: plansValue.map(parseSubscriptionPlanDto),
+  };
+};
+
+export const parseCommunitySongCardListDto = (value: unknown): CommunitySongCardDto[] => {
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid community catalog response payload.');
+  }
+
+  return value.map(toCommunitySongCardDto);
+};
+
+export const parseCommunitySongDetailDto = (value: unknown): CommunitySongDetailDto => {
+  return toCommunitySongDetailDto(value);
 };
 
 export const parseCommunitySavedSongsDto = (value: unknown): CommunitySavedSongDto[] => {
-  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
-    return value.map((communitySongId) => ({ communitySongId }));
-  }
-
-  if (Array.isArray(value) && value.every((item) => isCommunitySavedSongDto(item))) {
-    return value;
+  if (Array.isArray(value)) {
+    return value.map(toCommunitySavedSongDto);
   }
 
   throw new Error('Invalid community saved songs response payload.');
+};
+
+export const parseCommunitySongVotesDto = (value: unknown): CommunitySongVotesDto => {
+  return toCommunitySongVotesDto(value);
 };

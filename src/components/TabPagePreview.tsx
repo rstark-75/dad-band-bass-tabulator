@@ -12,7 +12,7 @@ import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { palette } from '../constants/colors';
 import { ParsedBar, TabRowAnnotation, SLOTS_PER_BAR, EMPTY_SLOT } from '../utils/tabLayout';
-import { getNoteRenderStyle, isEmptySlotValue } from '../utils/tabPreviewTimeline';
+import { getNoteRenderStyle, isEmptySlotValue, isNumericTabValue } from '../utils/tabPreviewTimeline';
 
 export type TabPreviewRenderMode = 'ascii' | 'svg';
 
@@ -32,7 +32,6 @@ export interface TabPagePreviewProps extends TabPreviewContentProps {
 }
 
 interface AnnotationFormat {
-  align: 'left' | 'center' | 'right';
   text: string;
 }
 
@@ -42,7 +41,7 @@ interface Segment {
   underline?: boolean;
 }
 
-const beatGuide = '  |1 & 2 & 3 & 4 &';
+const beatGuideBody = '|1 & 2 & 3 & 4 &';
 const slotToSegment = (value: string): string => {
   if (!value || isEmptySlotValue(value)) {
     return '--';
@@ -54,23 +53,26 @@ const slotToSegment = (value: string): string => {
 const joinRenderedBars = (segments: string[]) =>
   segments.map((segment, index) => (index === 0 ? segment : segment.slice(1))).join('');
 
-const parseAlignment = (value: string): AnnotationFormat => {
-  const trimmed = value.trim();
-  const match = trimmed.match(/^\[(left|center|right)\]\s*/i);
+const parseAnnotationLayout = (value: string): AnnotationFormat => {
+  let remainder = value;
 
-  if (!match) {
-    return { align: 'left', text: trimmed };
+  // Backward compatibility: strip old control tokens.
+  while (remainder.startsWith('[')) {
+    const controlMatch = remainder.match(/^\[(left|center|right|bar:\d+)\]\s*/i);
+
+    if (!controlMatch) {
+      break;
+    }
+
+    remainder = remainder.slice(controlMatch[0].length);
   }
 
-  return {
-    align: match[1].toLowerCase() as 'left' | 'center' | 'right',
-    text: trimmed.slice(match[0].length),
-  };
+  return { text: remainder };
 };
 
 const parseSegments = (value: string): Segment[] => {
   const segments: Segment[] = [];
-  const pattern = /(\*\*[^*]+\*\*|__[^_]+__)/g;
+  const pattern = /(<b>[\s\S]*?<\/b>|<u>[\s\S]*?<\/u>|\*\*[^*]+\*\*|__[^_]+__)/gi;
   let lastIndex = 0;
 
   value.replace(pattern, (match, _group, offset) => {
@@ -78,7 +80,13 @@ const parseSegments = (value: string): Segment[] => {
       segments.push({ text: value.slice(lastIndex, offset) });
     }
 
-    if (match.startsWith('**')) {
+    const lowerMatch = match.toLowerCase();
+
+    if (lowerMatch.startsWith('<b>') && lowerMatch.endsWith('</b>')) {
+      segments.push({ text: match.slice(3, -4), bold: true });
+    } else if (lowerMatch.startsWith('<u>') && lowerMatch.endsWith('</u>')) {
+      segments.push({ text: match.slice(3, -4), underline: true });
+    } else if (match.startsWith('**')) {
       segments.push({ text: match.slice(2, -2), bold: true });
     } else {
       segments.push({ text: match.slice(2, -2), underline: true });
@@ -163,6 +171,9 @@ function AsciiTabPagePreview({
   style,
 }: TabPreviewContentProps) {
   const isDark = tone === 'dark';
+  const labelWidth = Math.max(1, ...stringNames.map((stringName) => stringName.length));
+  const barStartColumns = labelWidth + 1;
+  const beatGuide = `${' '.repeat(barStartColumns)}${beatGuideBody}`;
   const resolvedRowBarCounts = resolveRowBarCounts(bars, rowBarCounts, barsPerRow);
   let barCursor = 0;
 
@@ -187,7 +198,13 @@ function AsciiTabPagePreview({
             ) : null}
 
             {annotation?.beforeText?.trim() ? (
-              <AnnotationLine value={annotation.beforeText} compact={compact} dark={isDark} />
+              <AnnotationLine
+                value={annotation.beforeText}
+                compact={compact}
+                dark={isDark}
+                mode="ascii"
+                prefixChars={barStartColumns}
+              />
             ) : null}
 
             <Text
@@ -207,7 +224,7 @@ function AsciiTabPagePreview({
                   isDark ? styles.darkTabText : styles.lightTabText,
                 ]}
               >
-                {`${stringName} ${joinRenderedBars(
+                {`${stringName.padEnd(labelWidth)} ${joinRenderedBars(
                   rowBars.map((bar) =>
                     `|${(bar.cells[stringName] ?? Array.from({ length: SLOTS_PER_BAR }, () => EMPTY_SLOT))
                       .map(slotToSegment)
@@ -218,7 +235,13 @@ function AsciiTabPagePreview({
             ))}
 
             {annotation?.afterText?.trim() ? (
-              <AnnotationLine value={annotation.afterText} compact={compact} dark={isDark} />
+              <AnnotationLine
+                value={annotation.afterText}
+                compact={compact}
+                dark={isDark}
+                mode="ascii"
+                prefixChars={barStartColumns}
+              />
             ) : null}
           </View>
         );
@@ -230,6 +253,8 @@ function AsciiTabPagePreview({
 const SVG_SLOT_WIDTH = 18;
 const SVG_SLOT_GAP = 4;
 const SVG_ROW_PADDING = 12;
+const SVG_ROW_GAP = 8;
+const SVG_LABEL_COLUMN_WIDTH = 18;
 const SVG_STRING_SPACING = 20;
 const SVG_MIN_ROW_WIDTH = 240;
 const SVG_MIN_ROW_HEIGHT = 70;
@@ -299,7 +324,13 @@ function SvgTabPagePreview({
             ) : null}
 
             {annotation?.beforeText?.trim() ? (
-              <AnnotationLine value={annotation.beforeText} compact={compact} dark={isDark} />
+              <AnnotationLine
+                value={annotation.beforeText}
+                compact={compact}
+                dark={isDark}
+                mode="svg"
+                leftInset={SVG_LABEL_COLUMN_WIDTH + SVG_ROW_GAP + SVG_ROW_PADDING}
+              />
             ) : null}
 
             <View style={[styles.svgRowContent, { minHeight: svgHeight }]}>
@@ -355,18 +386,22 @@ function SvgTabPagePreview({
                         }
 
                         const trimmed = slot.trim();
+                        const renderedValue = trimmed.replace(/-+$/g, '') || trimmed;
+                        const isTimedNote = isNumericTabValue(trimmed);
                         const fretX =
                           SVG_ROW_PADDING +
                           barIndex * SLOTS_PER_BAR * slotAdvance +
                           slotIndex * slotAdvance +
                           SVG_SLOT_WIDTH / 2;
                         const fretY = stringPositions[stringIndex];
-                        const noteStyle = getNoteRenderStyle({
-                          rowBars,
-                          stringName,
-                          barIndex,
-                          slotIndex,
-                        });
+                        const noteStyle = isTimedNote
+                          ? getNoteRenderStyle({
+                            rowBars,
+                            stringName,
+                            barIndex,
+                            slotIndex,
+                          })
+                          : 'short';
                         const shortBeatStemBaseY = fretY - SVG_SHORT_BEAT_STEM_Y_OFFSET;
                         const stemTop = shortBeatStemBaseY - SVG_STEM_HEIGHT;
                         const circleCenterY =
@@ -381,13 +416,15 @@ function SvgTabPagePreview({
                               : 0;
                         const circleTopY = circleCenterY - circleRadius;
                         const tailOriginY =
-                          noteStyle === 'short'
-                            ? stemTop
-                            : noteStyle === 'hold2'
-                              ? circleTopY
-                              : undefined;
-                        const shouldDrawStem = noteStyle === 'short' || noteStyle === 'beat';
-                        const shouldDrawHoldTail = noteStyle === 'hold2';
+                          isTimedNote
+                            ? noteStyle === 'short'
+                              ? stemTop
+                              : noteStyle === 'hold2'
+                                ? circleTopY
+                                : undefined
+                            : undefined;
+                        const shouldDrawStem = isTimedNote && (noteStyle === 'short' || noteStyle === 'beat');
+                        const shouldDrawHoldTail = isTimedNote && noteStyle === 'hold2';
                         const stemX =
                           noteStyle === 'short' || noteStyle === 'beat'
                             ? fretX + SVG_STEM_X_OFFSET - SVG_SHORT_BEAT_STEM_LEFT_ADJUST
@@ -403,14 +440,14 @@ function SvgTabPagePreview({
                               textAnchor="middle"
                               alignmentBaseline="middle"
                             >
-                              {trimmed}
+                              {renderedValue}
                             </SvgText>
 
                             {shouldDrawStem && renderNoteMarker(stemX, shortBeatStemBaseY, accentColor)}
                             {shouldDrawHoldTail && renderHoldTail(fretX, circleTopY, accentColor)}
                             {tailOriginY !== undefined && noteStyle !== 'hold2' &&
                               renderQuaverFlag(stemX, tailOriginY, accentColor)}
-                            {(noteStyle === 'hold4' || noteStyle === 'hold2') && (
+                            {isTimedNote && (noteStyle === 'hold4' || noteStyle === 'hold2') && (
                               <Circle
                                 cx={fretX}
                                 cy={circleCenterY}
@@ -430,7 +467,13 @@ function SvgTabPagePreview({
             </View>
 
             {annotation?.afterText?.trim() ? (
-              <AnnotationLine value={annotation.afterText} compact={compact} dark={isDark} />
+              <AnnotationLine
+                value={annotation.afterText}
+                compact={compact}
+                dark={isDark}
+                mode="svg"
+                leftInset={SVG_LABEL_COLUMN_WIDTH + SVG_ROW_GAP + SVG_ROW_PADDING}
+              />
             ) : null}
           </View>
         );
@@ -443,28 +486,31 @@ function AnnotationLine({
   value,
   compact,
   dark,
+  mode = 'ascii',
+  prefixChars = 0,
+  leftInset = 0,
 }: {
   value: string;
   compact: boolean;
   dark: boolean;
+  mode?: 'ascii' | 'svg';
+  prefixChars?: number;
+  leftInset?: number;
 }) {
-  const { align, text } = parseAlignment(value);
+  const { text } = parseAnnotationLayout(value);
   const segments = parseSegments(text);
+  const prefix = prefixChars > 0 ? ' '.repeat(prefixChars) : '';
 
   return (
-    <View
-      style={[
-        styles.annotationRow,
-        align === 'center' && styles.centerAlign,
-        align === 'right' && styles.rightAlign,
-      ]}
-    >
+    <View style={[styles.annotationRow, leftInset > 0 ? { paddingLeft: leftInset } : undefined]}>
       <Text
         style={[
           compact ? styles.compactAnnotationText : styles.annotationText,
+          mode === 'svg' && (compact ? styles.compactSvgAnnotationText : styles.svgAnnotationText),
           dark ? styles.darkAnnotationText : styles.lightAnnotationText,
         ]}
       >
+        {prefix}
         {segments.map((segment, index) => (
           <Fragment key={`${segment.text}-${index}`}>
             <Text
@@ -517,19 +563,27 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 1,
   },
-  centerAlign: {
-    alignItems: 'center',
-  },
-  rightAlign: {
-    alignItems: 'flex-end',
-  },
   annotationText: {
+    fontFamily: 'monospace',
     fontSize: 11,
     lineHeight: 14,
+    ...monoWeb,
   },
   compactAnnotationText: {
+    fontFamily: 'monospace',
     fontSize: 9,
     lineHeight: 11,
+    ...monoWeb,
+  },
+  svgAnnotationText: {
+    fontSize: 13,
+    lineHeight: 17,
+    letterSpacing: 3.3,
+  },
+  compactSvgAnnotationText: {
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 2.2,
   },
   tabText: {
     fontFamily: 'monospace',
@@ -573,9 +627,10 @@ const styles = StyleSheet.create({
   svgRowContent: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: SVG_ROW_GAP,
   },
   svgLabelColumn: {
+    width: SVG_LABEL_COLUMN_WIDTH,
     justifyContent: 'space-between',
   },
   svgLabelText: {

@@ -10,8 +10,11 @@ interface LibrarySongCardProps {
   onEdit: () => void;
   onLive: () => void;
   onDelete: () => void;
+  isPublishedToCommunity?: boolean;
   onToggleCommunityRelease?: () => void;
+  onLockedCommunityAction?: () => void;
   isCommunityReleaseUpdating?: boolean;
+  isCommunityActionLocked?: boolean;
 }
 
 export function LibrarySongCard({
@@ -19,9 +22,21 @@ export function LibrarySongCard({
   onEdit,
   onLive,
   onDelete,
+  isPublishedToCommunity = false,
   onToggleCommunityRelease,
+  onLockedCommunityAction,
   isCommunityReleaseUpdating = false,
+  isCommunityActionLocked = false,
 }: LibrarySongCardProps) {
+  const handleCommunityActionPress = () => {
+    if (isCommunityActionLocked) {
+      onLockedCommunityAction?.();
+      return;
+    }
+
+    onToggleCommunityRelease?.();
+  };
+
   return (
     <View style={styles.card}>
       <Pressable onPress={onEdit} style={({ pressed }) => [styles.summary, pressed && styles.pressed]}>
@@ -40,9 +55,9 @@ export function LibrarySongCard({
           <Text style={styles.metaText} numberOfLines={1} ellipsizeMode="tail">
             {`${song.tuning} • Updated ${formatUpdatedAt(song.updatedAt)}`}
           </Text>
-          {song.releasedToCommunity ? (
+          {isPublishedToCommunity ? (
             <View style={styles.communityBadge}>
-              <Text style={styles.communityBadgeText}>Community Live</Text>
+              <Text style={styles.communityBadgeText}>In Community</Text>
             </View>
           ) : null}
         </View>
@@ -56,14 +71,15 @@ export function LibrarySongCard({
             <PrimaryButton
               label={
                 isCommunityReleaseUpdating
-                  ? 'Updating...'
-                  : song.releasedToCommunity
-                    ? 'Unrelease'
-                    : 'Release'
+                  ? (isPublishedToCommunity ? 'Updating...' : 'Adding...')
+                  : isPublishedToCommunity
+                    ? 'Unlist from Community'
+                    : 'Add to Community'
               }
-              onPress={onToggleCommunityRelease}
+              onPress={handleCommunityActionPress}
               variant="ghost"
               disabled={isCommunityReleaseUpdating}
+              style={isCommunityActionLocked ? styles.lockedAction : undefined}
             />
           ) : null}
           <PrimaryButton label="Bin Song" onPress={onDelete} variant="danger" />
@@ -125,14 +141,17 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: '#dbeafe',
+    backgroundColor: '#dcfce7',
   },
   communityBadgeText: {
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
-    color: '#1e40af',
+    color: '#166534',
+  },
+  lockedAction: {
+    opacity: 0.55,
   },
   footer: {
     gap: 12,

@@ -20,6 +20,7 @@ import { LandingScreen } from '../screens/LandingScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { LiveViewScreen } from '../screens/LiveViewScreen';
 import { SetlistExportScreen } from '../screens/SetlistExportScreen';
+import { SetlistPerformanceScreen } from '../screens/SetlistPerformanceScreen';
 import { SongExportScreen } from '../screens/SongExportScreen';
 import { SetlistScreen } from '../screens/SetlistScreen';
 import { SongEditorScreen } from '../screens/SongEditorScreen';
@@ -207,13 +208,28 @@ export function AppNavigator() {
             <Stack.Screen
               name="SongEditor"
               component={SongEditorScreen}
-              options={{ title: 'Dad Band Bass Edit Song' }}
+              options={{ headerShown: false }}
             />
             <Stack.Screen
               name="PerformanceView"
               component={LiveViewScreen}
               options={{
                 title: 'Dad Band Bass Live View',
+                headerStyle: { backgroundColor: palette.liveBackground },
+                headerTintColor: palette.liveText,
+                headerTitleStyle: {
+                  color: palette.liveText,
+                  fontWeight: '700',
+                  fontFamily: brandDisplayFontFamily,
+                },
+                contentStyle: { backgroundColor: palette.liveBackground },
+              }}
+            />
+            <Stack.Screen
+              name="SetlistPerformance"
+              component={SetlistPerformanceScreen}
+              options={{
+                title: 'Setlist Performance',
                 headerStyle: { backgroundColor: palette.liveBackground },
                 headerTintColor: palette.liveText,
                 headerTitleStyle: {

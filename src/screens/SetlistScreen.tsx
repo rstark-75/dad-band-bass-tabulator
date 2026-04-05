@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Modal, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -30,6 +30,8 @@ export function SetlistScreen({ navigation }: Props) {
     activeSetlistId,
     setActiveSetlist,
     createSetlist,
+    renameSetlist,
+    deleteSetlist,
     addSongToSetlist,
     removeSongFromSetlist,
     moveSetlistSong,
@@ -37,7 +39,16 @@ export function SetlistScreen({ navigation }: Props) {
   const [statusMessage, setStatusMessage] = useState(
     'Build gig-ready running orders and keep transitions tight.',
   );
+  const [setlistNameDraft, setSetlistNameDraft] = useState(setlist.name);
+  const [setlistPendingDelete, setSetlistPendingDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const freeSetlistLimit = capabilities.maxSetlists ?? 1;
+
+  useEffect(() => {
+    setSetlistNameDraft(setlist.name);
+  }, [setlist.id, setlist.name]);
 
   const orderedSongs = useMemo(
     () =>
@@ -81,6 +92,37 @@ export function SetlistScreen({ navigation }: Props) {
     addSongToSetlist(songId);
   };
 
+  const handleRenameSetlist = () => {
+    const nextName = setlistNameDraft.trim();
+
+    if (!nextName) {
+      setStatusMessage('Setlist name cannot be empty.');
+      return;
+    }
+
+    renameSetlist(setlist.id, nextName);
+    setStatusMessage(`Renamed setlist to "${nextName}".`);
+  };
+
+  const handleDeleteSetlist = () => {
+    if (setlists.length <= 1) {
+      setStatusMessage('Keep at least one setlist in your account.');
+      return;
+    }
+
+    setSetlistPendingDelete({ id: setlist.id, name: setlist.name });
+  };
+
+  const confirmDeleteSetlist = () => {
+    if (!setlistPendingDelete) {
+      return;
+    }
+
+    deleteSetlist(setlistPendingDelete.id);
+    setSetlistPendingDelete(null);
+    setStatusMessage(`Deleted "${setlistPendingDelete.name}".`);
+  };
+
   return (
     <ScreenContainer contentStyle={styles.content}>
       <View style={styles.header}>
@@ -101,6 +143,12 @@ export function SetlistScreen({ navigation }: Props) {
           onGoPro={() => navigation.navigate('Upgrade')}
         />
         <View style={styles.headerActions}>
+          {orderedSongs.length > 0 ? (
+            <PrimaryButton
+              label="Play Setlist"
+              onPress={() => navigation.navigate('SetlistPerformance', { setlistId: activeSetlistId })}
+            />
+          ) : null}
           <PrimaryButton
             label="New Setlist"
             onPress={handleCreateSetlist}
@@ -133,6 +181,32 @@ export function SetlistScreen({ navigation }: Props) {
           </View>
         </View>
       ) : null}
+
+      <View style={styles.manageCard}>
+        <Text style={styles.manageTitle}>Manage Setlist</Text>
+        <TextInput
+          value={setlistNameDraft}
+          onChangeText={setSetlistNameDraft}
+          placeholder="Setlist name"
+          placeholderTextColor={palette.textMuted}
+          style={styles.nameInput}
+        />
+        <View style={styles.manageActions}>
+          <PrimaryButton
+            label="Rename"
+            onPress={handleRenameSetlist}
+            variant="secondary"
+            size="compact"
+          />
+          <PrimaryButton
+            label="Delete Setlist"
+            onPress={handleDeleteSetlist}
+            variant="danger"
+            size="compact"
+            disabled={setlists.length <= 1}
+          />
+        </View>
+      </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Current Order</Text>
@@ -223,6 +297,36 @@ export function SetlistScreen({ navigation }: Props) {
           ))
         )}
       </View>
+
+      <Modal
+        visible={Boolean(setlistPendingDelete)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSetlistPendingDelete(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Delete setlist?</Text>
+            <Text style={styles.modalText}>
+              {setlistPendingDelete
+                ? `Are you sure you want to delete "${setlistPendingDelete.name}"?`
+                : ''}
+            </Text>
+            <View style={styles.modalActions}>
+              <PrimaryButton
+                label="Cancel"
+                onPress={() => setSetlistPendingDelete(null)}
+                variant="ghost"
+              />
+              <PrimaryButton
+                label="Delete"
+                onPress={confirmDeleteSetlist}
+                variant="danger"
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
@@ -276,6 +380,35 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   switcherOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  manageCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    padding: 14,
+    gap: 10,
+  },
+  manageTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: palette.text,
+  },
+  nameInput: {
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.background,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: palette.text,
+  },
+  manageActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
@@ -370,5 +503,38 @@ const styles = StyleSheet.create({
   libraryMeta: {
     fontSize: 14,
     color: palette.textMuted,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.48)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 24,
+    padding: 20,
+    gap: 16,
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: palette.text,
+  },
+  modalText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: palette.textMuted,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'flex-end',
   },
 });

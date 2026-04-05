@@ -4,6 +4,7 @@ import { useAuth } from '../auth/state/useAuth';
 import { subscriptionService } from './subscriptionService';
 import {
   BillingCurrency,
+  SubscriptionCapabilityDefaults,
   SubscriptionCapabilities,
   SubscriptionPricing,
   SubscriptionSnapshot,
@@ -19,6 +20,10 @@ interface SubscriptionContextValue {
   priceLabel: string;
   upgrade: () => Promise<void>;
   refresh: () => Promise<void>;
+  communitySongsSaved: number;
+  setCommunitySongsSaved: (value: number) => void;
+  capabilityDefaults: SubscriptionCapabilityDefaults | null;
+  capabilityDefaultsLoaded: boolean;
   isLoading: boolean;
 }
 
@@ -26,7 +31,13 @@ const defaultCapabilities: SubscriptionCapabilities = {
   maxSongs: 10,
   maxSetlists: 1,
   maxCommunitySongs: 2,
+  maxCommunitySaves: 2,
   svgEnabled: false,
+};
+
+const defaultCapabilityDefaults: SubscriptionCapabilityDefaults = {
+  free: defaultCapabilities,
+  pro: defaultCapabilities,
 };
 
 const defaultPricing: SubscriptionPricing = {
@@ -39,6 +50,16 @@ const defaultPricing: SubscriptionPricing = {
     },
   ],
 };
+
+const serializePricing = (pricing: SubscriptionPricing) =>
+  pricing.plans
+    .map(
+      (plan) =>
+        `${plan.plan}|${plan.label}|${plan.interval}|${plan.prices
+          .map((price) => `${price.currency}${price.unitAmountMinor}`)
+          .join(',')}`,
+    )
+    .join(';');
 
 const SubscriptionContext = createContext<SubscriptionContextValue | undefined>(undefined);
 
@@ -79,21 +100,41 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
   const { authState } = useAuth();
   const [snapshot, setSnapshot] = useState<SubscriptionSnapshot | null>(null);
   const [pricing, setPricing] = useState<SubscriptionPricing>(defaultPricing);
+  const [capabilityDefaults, setCapabilityDefaults] = useState<SubscriptionCapabilityDefaults | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     const nextSnapshot = await subscriptionService.loadSnapshot();
-    let nextPricing: SubscriptionPricing = pricing;
 
     try {
-      nextPricing = await subscriptionService.loadPricing();
+      const nextPricing = await subscriptionService.loadPricing();
+      setPricing((current) =>
+        serializePricing(current) === serializePricing(nextPricing) ? current : nextPricing,
+      );
     } catch (error) {
       console.warn('Subscription pricing refresh failed', error);
     }
 
     setSnapshot(nextSnapshot);
-    setPricing(nextPricing);
-  }, [pricing]);
+    console.info(
+      'Subscription snapshot',
+      nextSnapshot.communitySongsSaved,
+      nextSnapshot.capabilities,
+    );
+  }, []);
+
+  const setCommunitySongsSaved = useCallback((value: number) => {
+    setSnapshot((current) => {
+      if (!current) {
+        return current;
+      }
+
+      console.info('Set communitySongsSaved', value);
+      return { ...current, communitySongsSaved: value };
+    });
+  }, []);
 
   useEffect(() => {
     void refresh().catch((error) => {
@@ -110,6 +151,15 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
       console.warn('Subscription refresh failed after auth change', error);
     });
   }, [authState.type, refresh]);
+
+  useEffect(() => {
+    void subscriptionService
+      .loadCapabilityDefaults()
+      .then(setCapabilityDefaults)
+      .catch((error) => {
+        console.warn('Subscription capability defaults refresh failed', error);
+      });
+  }, []);
 
   const upgrade = useCallback(async () => {
     setIsLoading(true);
@@ -136,9 +186,13 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
       priceLabel,
       upgrade,
       refresh,
+      communitySongsSaved: snapshot?.communitySongsSaved ?? 0,
+      setCommunitySongsSaved,
+      capabilityDefaults,
+      capabilityDefaultsLoaded: capabilityDefaults !== null,
       isLoading,
     }),
-    [isLoading, priceLabel, pricing, refresh, snapshot, upgrade],
+    [isLoading, priceLabel, pricing, refresh, snapshot, upgrade, setCommunitySongsSaved, capabilityDefaults],
   );
 
   return <SubscriptionContext.Provider value={value}>{children}</SubscriptionContext.Provider>;

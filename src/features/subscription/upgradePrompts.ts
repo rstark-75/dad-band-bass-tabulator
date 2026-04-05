@@ -8,60 +8,45 @@ export interface UpgradePromptContent {
   features: string[];
 }
 
+const proBenefits = [
+  'Unlimited songs',
+  'Unlimited setlists',
+  'Performance Mode (SVG)',
+  '5 & 6-string support',
+  'Community access',
+  'Support from creators',
+];
+
 export const upgradePromptContent: Record<UpgradeTrigger, UpgradePromptContent> = {
   SONG_LIMIT: {
     title: 'Unlock Performance Mode',
     valueStatement: 'Keep your full songbook stage-ready.',
     triggerMessage: 'You’ve reached 10 songs. Upgrade to keep building your library.',
-    features: [
-      'Unlimited songs for rehearsals and gigs',
-      'Unlimited setlists for different nights',
-      'Performance Mode with smooth SVG tabs',
-      'Full access to community tabs',
-    ],
+    features: proBenefits,
   },
   SETLIST_LIMIT: {
     title: 'Play Without Setlist Limits',
     valueStatement: 'Build separate running orders for every show.',
     triggerMessage: 'Upgrade to create unlimited setlists for gigs and rehearsals.',
-    features: [
-      'Unlimited setlists',
-      'Unlimited songs',
-      'Performance Mode with stage-ready SVG tabs',
-      'Unlimited community song saves',
-    ],
+    features: proBenefits,
   },
   SVG_MODE: {
     title: 'Unlock Performance Mode',
     valueStatement: 'Read cleaner tabs when the stage lights are low.',
     triggerMessage: 'Performance Mode gives you clean, stage-ready tabs.',
-    features: [
-      'Smooth, readable SVG tabs',
-      'Unlimited songs and setlists',
-      'Unlimited community song saves',
-    ],
+    features: proBenefits,
   },
   COMMUNITY_SAVE: {
     title: 'Unlock More Community Tracks',
     valueStatement: 'Keep every useful chart you find.',
     triggerMessage: 'Unlock full access to community tabs.',
-    features: [
-      'Unlimited community song saves',
-      'Unlimited songs in your library',
-      'Performance Mode with SVG tabs',
-      'Unlimited setlists',
-    ],
+    features: proBenefits,
   },
   PDF_EXPORT: {
     title: 'Unlock Offline Export',
     valueStatement: 'Take clean charts to gigs without internet.',
     triggerMessage: 'No Internet at GIG - then export your tabs to your device.',
-    features: [
-      'Export song charts as PDF',
-      'Export full setlists as multi-page PDF',
-      'Keep offline backups ready before the gig',
-      'Everything else in Pro',
-    ],
+    features: proBenefits,
   },
 };
 
