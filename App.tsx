@@ -8,6 +8,7 @@ import { AuthProvider } from './src/features/auth';
 import { SubscriptionProvider, UpgradePromptProvider } from './src/features/subscription';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { BassTabProvider } from './src/store/BassTabProvider';
+import { FinalizingUpgradeOverlay } from './src/components/FinalizingUpgradeOverlay';
 
 export default function App() {
   return (
@@ -16,10 +17,11 @@ export default function App() {
         <AuthProvider>
           <SubscriptionProvider>
             <BassTabProvider>
-              <UpgradePromptProvider>
-                <StatusBar style="light" />
-                <AppNavigator />
-              </UpgradePromptProvider>
+            <UpgradePromptProvider>
+              <StatusBar style="light" />
+              <AppNavigator />
+              <FinalizingUpgradeOverlay />
+            </UpgradePromptProvider>
             </BassTabProvider>
           </SubscriptionProvider>
         </AuthProvider>

@@ -1,6 +1,7 @@
 import { ScrollView, StyleSheet, Text, View, Pressable, useWindowDimensions } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
 
 import { useSubscription } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
@@ -45,10 +46,17 @@ export function UpgradeScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const { tier, upgrade, isLoading, priceLabel } = useSubscription();
   const useTwoColumns = width > 560;
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   const handleUpgrade = async () => {
-    await upgrade();
-    navigation.goBack();
+    setUpgradeError(null);
+    try {
+      await upgrade();
+      navigation.goBack();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+      setUpgradeError(message);
+    }
   };
 
   return (
@@ -116,6 +124,10 @@ export function UpgradeScreen({ navigation }: Props) {
             {tier === 'PRO' ? 'Pro Unlocked' : isLoading ? 'Unlocking Pro...' : `Buy Now - ${priceLabel}/month`}
           </Text>
         </Pressable>
+
+        {upgradeError ? (
+          <Text style={styles.errorText}>{upgradeError}</Text>
+        ) : null}
 
         <Pressable
           onPress={() => navigation.goBack()}
@@ -319,6 +331,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#cbd5e1',
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#f87171',
+    textAlign: 'center',
   },
   pressed: {
     opacity: 0.86,

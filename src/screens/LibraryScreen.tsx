@@ -14,9 +14,19 @@ import { SearchBar } from '../components/SearchBar';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
 import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../features/subscription';
+import { useAuth } from '../features/auth';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
-import { usePublishedSongLookup } from '../hooks/usePublishedSongLookup';
+import { Song } from '../types/models';
+import { usePublishedSongLookup, PublishedSongInfo } from '../hooks/usePublishedSongLookup';
+
+const needsRepublish = (song: Song, publishedInfo?: PublishedSongInfo): boolean => {
+  if (!publishedInfo) {
+    return false;
+  }
+
+  return song.updatedAt !== publishedInfo.updatedAt;
+};
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<TabParamList, 'Library'>,
@@ -26,13 +36,15 @@ type Props = CompositeScreenProps<
 export function LibraryScreen({ navigation }: Props) {
   const { tier } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
+  const { authState } = useAuth();
+  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
   const {
     songs,
     createSong,
     deleteSong,
   } = useBassTab();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
-  const { lookup: publishedBySourceSongId, refresh: refreshPublishedLookup } = usePublishedSongLookup(
+  const { lookup: publishedLookup, refresh: refreshPublishedLookup } = usePublishedSongLookup(
     backendApi,
   );
   const [query, setQuery] = useState('');
@@ -93,12 +105,14 @@ export function LibraryScreen({ navigation }: Props) {
     setPublishingSongId(song.id);
 
     try {
-      const existingPublishedSongId = publishedBySourceSongId[song.id];
+      const publishedInfo = publishedLookup[song.id];
+      const existingPublishedSongId = publishedInfo?.publishedSongId;
+      const isOrphaned = publishedInfo?.ownershipStatus === 'ORPHANED';
 
-      if (existingPublishedSongId) {
-        await backendApi.unlistPublishedSong(existingPublishedSongId);
-        await refreshPublishedLookup();
-        setStatusMessage(`"${song.title}" unlisted from Community.`);
+      if (existingPublishedSongId && !isOrphaned) {
+        await backendApi.disownCommunitySong(existingPublishedSongId);
+        await deleteSong(song.id);
+        setStatusMessage(`"${song.title}" released — it's now free to be claimed by the community.`);
       } else {
         await backendApi.publishSong(song.id);
         const nextLookup = await refreshPublishedLookup();
@@ -110,6 +124,32 @@ export function LibraryScreen({ navigation }: Props) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not update community publish state.';
+      setStatusMessage(message);
+    } finally {
+      setPublishingSongId(null);
+    }
+  };
+
+  const handleRepublish = async (songId: string) => {
+    if (!backendApi || publishingSongId) {
+      return;
+    }
+
+    const song = songs.find((item) => item.id === songId);
+
+    if (!song) {
+      return;
+    }
+
+    setPublishingSongId(song.id);
+
+    try {
+      await backendApi.publishSong(song.id);
+      await refreshPublishedLookup();
+      setStatusMessage(`"${song.title}" republished to Community.`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Could not republish this song to community.';
       setStatusMessage(message);
     } finally {
       setPublishingSongId(null);
@@ -159,26 +199,48 @@ export function LibraryScreen({ navigation }: Props) {
           description="Try a different search term or create a new chart."
         />
       ) : (
-        filteredSongs.map((song) => (
-          <LibrarySongCard
-            key={song.id}
-            song={song}
-            onEdit={() => navigation.navigate('SongEditor', { songId: song.id })}
-            onLive={() => navigation.navigate('PerformanceView', { songId: song.id })}
-            onDelete={() => handleDeleteSong(song.id, song.title)}
-            onToggleCommunityRelease={
-              backendApi
-                ? () => {
-                  void handleToggleCommunityRelease(song.id);
-                }
-                : undefined
-            }
-            isPublishedToCommunity={Boolean(publishedBySourceSongId[song.id])}
-            onLockedCommunityAction={() => showUpgradePrompt('COMMUNITY_SAVE')}
-            isCommunityReleaseUpdating={publishingSongId === song.id}
-            isCommunityActionLocked={tier === 'FREE'}
-          />
-        ))
+        filteredSongs.map((song) => {
+          const publishedInfo = publishedLookup[song.id];
+          const isOrphanedInCommunity =
+            Boolean(publishedInfo?.publishedSongId) &&
+            (publishedInfo?.ownershipStatus === 'ORPHANED' ||
+              (publishedInfo?.ownerUserId != null &&
+                publishedInfo?.ownerUserId !== currentUserId));
+
+          return (
+            <LibrarySongCard
+              key={song.id}
+              song={song}
+              onEdit={() => navigation.navigate('SongEditor', { songId: song.id })}
+              onLive={() => navigation.navigate('PerformanceView', { songId: song.id })}
+              onDelete={() => handleDeleteSong(song.id, song.title)}
+              onToggleCommunityRelease={
+                backendApi
+                  ? () => {
+                    void handleToggleCommunityRelease(song.id);
+                  }
+                  : undefined
+              }
+              isPublishedToCommunity={
+                Boolean(publishedInfo?.publishedSongId) &&
+                publishedInfo?.ownershipStatus !== 'ORPHANED'
+              }
+              isOrphanedInCommunity={isOrphanedInCommunity}
+              onLockedCommunityAction={() => showUpgradePrompt('COMMUNITY_SAVE')}
+              isCommunityReleaseUpdating={publishingSongId === song.id}
+              isCommunityActionLocked={tier === 'FREE'}
+              onRepublish={
+                !isOrphanedInCommunity && publishedInfo?.publishedSongId
+                  ? () => {
+                    void handleRepublish(song.id);
+                  }
+                  : undefined
+              }
+              showRepublish={!isOrphanedInCommunity && needsRepublish(song, publishedInfo)}
+              isRepublishDisabled={publishingSongId === song.id}
+            />
+          );
+        })
       )}
 
       <Modal

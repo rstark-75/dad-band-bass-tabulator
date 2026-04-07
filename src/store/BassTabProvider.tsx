@@ -32,6 +32,7 @@ interface SongInput {
   key?: string;
   feelNote?: string;
   tuning?: string;
+  stringCount?: number;
 }
 
 interface LegacySection {
@@ -74,7 +75,7 @@ interface BassTabContextValue {
   activeSetlistId: string;
   storageFileUri: string;
   createSong: (input?: SongInput) => Promise<Song>;
-  importSongFromDto: (dto: SongDto) => Song;
+  importSongFromDto: (dto: SongDto, overrides?: Partial<Song>) => Song;
   createSetlist: (name?: string) => Setlist;
   renameSetlist: (setlistId: string, name: string) => void;
   deleteSetlist: (setlistId: string) => void;
@@ -99,17 +100,48 @@ const storageKeys = {
   activeSetlistId: 'basstab:active-setlist-id',
 };
 
-const createEmptyRow = (label = 'Intro'): SongRow => ({
+const STRING_NAME_PRESETS: Record<number, string[]> = {
+  4: ['G', 'D', 'A', 'E'],
+  5: ['G', 'D', 'A', 'E', 'B'],
+  6: ['C', 'G', 'D', 'A', 'E', 'B'],
+};
+
+export const buildDefaultStringNames = (count: number): string[] => {
+  if (STRING_NAME_PRESETS[count]) {
+    return [...STRING_NAME_PRESETS[count]];
+  }
+
+  if (count <= 0) {
+    return [...STRING_NAME_PRESETS[4]];
+  }
+
+  const nextStrings: string[] = [...STRING_NAME_PRESETS[4]];
+  let index = 0;
+
+  while (nextStrings.length < count) {
+    nextStrings.push(`String ${index + 1}`);
+    index += 1;
+  }
+
+  return nextStrings.slice(0, count);
+};
+
+const createEmptyRow = (
+  label = 'Intro',
+  stringNames: string[] = buildDefaultStringNames(FREE_PLAN_LIMITS.strings),
+): SongRow => ({
   id: createId('row'),
   label,
   beforeText: '',
   afterText: '',
   bars: Array.from({ length: 4 }, () => ({
     cells: {
-      G: Array.from({ length: 8 }, () => '-'),
-      D: Array.from({ length: 8 }, () => '-'),
-      A: Array.from({ length: 8 }, () => '-'),
-      E: Array.from({ length: 8 }, () => '-'),
+      ...Object.fromEntries(
+        stringNames.map((stringName) => [
+          stringName,
+          Array.from({ length: 8 }, () => '-'),
+        ]),
+      ),
     },
   })),
 });
@@ -157,12 +189,21 @@ const initialDefaultSetlist = createDefaultSetlist();
 
 const migrateLegacySong = (legacySong: Song | LegacySong): Song => {
   if ('rows' in legacySong && Array.isArray(legacySong.rows)) {
-    return legacySong as Song;
+    const currentSong = legacySong as Song;
+    const inferredStringCount =
+      currentSong.stringCount ?? currentSong.stringNames.length ?? FREE_PLAN_LIMITS.strings;
+
+    return {
+      ...currentSong,
+      stringCount: inferredStringCount,
+    };
   }
 
   const legacySections = (legacySong as LegacySong).sections ?? [];
 
   if (legacySections.length === 0) {
+    const defaultStringNames = buildDefaultStringNames(FREE_PLAN_LIMITS.strings);
+
     return {
       id: legacySong.id,
       title: legacySong.title,
@@ -171,8 +212,9 @@ const migrateLegacySong = (legacySong: Song | LegacySong): Song => {
       feelNote: legacySong.feelNote,
       tuning: legacySong.tuning,
       updatedAt: legacySong.updatedAt,
-      stringNames: ['G', 'D', 'A', 'E'],
-      rows: [createEmptyRow()],
+      stringCount: defaultStringNames.length,
+      stringNames: defaultStringNames,
+      rows: [createEmptyRow('Intro', defaultStringNames)],
     };
   }
 
@@ -208,6 +250,7 @@ const migrateLegacySong = (legacySong: Song | LegacySong): Song => {
     feelNote: legacySong.feelNote,
     tuning: legacySong.tuning,
     updatedAt: legacySong.updatedAt,
+    stringCount: stringNames.length,
     stringNames,
     rows,
   };
@@ -259,6 +302,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     maxSetlists: FREE_PLAN_LIMITS.setlists,
     maxCommunitySongs: FREE_PLAN_LIMITS.communitySaves,
     maxCommunitySaves: FREE_PLAN_LIMITS.communitySaves,
+    maxStringCount: FREE_PLAN_LIMITS.strings,
     svgEnabled: false,
   };
   const backendBaseUrl = process.env.EXPO_PUBLIC_BASSTAB_API_URL?.trim();
@@ -438,6 +482,9 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       );
     }
 
+    const stringCount = input?.stringCount ?? FREE_PLAN_LIMITS.strings;
+    const stringNames = buildDefaultStringNames(stringCount);
+
     const draftSong: Song = {
       id: createId('song'),
       title: input?.title ?? 'Untitled Song',
@@ -446,8 +493,9 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       feelNote: input?.feelNote ?? 'Mid-tempo pocket',
       tuning: input?.tuning ?? tuningOptions[0],
       updatedAt: new Date().toISOString(),
-      stringNames: ['G', 'D', 'A', 'E'],
-      rows: [createEmptyRow('Intro')],
+      stringCount,
+      stringNames,
+      rows: [createEmptyRow('Intro', stringNames)],
     };
 
     if (!backendApi) {
@@ -462,6 +510,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
         key: draftSong.key,
         feelNote: draftSong.feelNote,
         tuning: draftSong.tuning,
+        stringCount: draftSong.stringCount,
         chart: {
           stringNames: draftSong.stringNames,
           rows: draftSong.rows,
@@ -474,8 +523,8 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     return createdSong;
   };
 
-  const importSongFromDto = useCallback((dto: SongDto): Song => {
-    const importedSong = fromSongDto(dto);
+  const importSongFromDto = useCallback((dto: SongDto, overrides?: Partial<Song>): Song => {
+    const importedSong = overrides ? { ...fromSongDto(dto), ...overrides } : fromSongDto(dto);
     setSongs((current) => {
       const nextSongs = current.filter((song) => song.id !== importedSong.id);
       return [importedSong, ...nextSongs];
@@ -597,12 +646,16 @@ export function BassTabProvider({ children }: PropsWithChildren) {
 
   const updateSong = (songId: string, updates: Partial<Song>) => {
     const syncState = { nextSongForSync: null as Song | null };
+    const inferredStringCount =
+      updates.stringCount ?? (updates.stringNames !== undefined ? updates.stringNames.length : undefined);
+    const normalizedUpdates =
+      inferredStringCount !== undefined ? { ...updates, stringCount: inferredStringCount } : updates;
 
     setSongs((current) =>
       current.map((song) =>
         song.id === songId
           ? (() => {
-            const nextSong = updateTimestamp({ ...song, ...updates });
+            const nextSong = updateTimestamp({ ...song, ...normalizedUpdates });
             syncState.nextSongForSync = nextSong;
             return nextSong;
           })()
@@ -622,6 +675,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       ...(updates.key !== undefined ? { key: updates.key } : {}),
       ...(updates.feelNote !== undefined ? { feelNote: updates.feelNote } : {}),
       ...(updates.tuning !== undefined ? { tuning: updates.tuning } : {}),
+      ...(normalizedUpdates.stringCount !== undefined ? { stringCount: normalizedUpdates.stringCount } : {}),
     };
     const hasMetadataUpdate = Object.keys(metadataPayload).length > 0;
     const hasChartUpdate = updates.stringNames !== undefined || updates.rows !== undefined;
@@ -629,7 +683,14 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     void (async () => {
       try {
         if (hasMetadataUpdate) {
-          await backendApi.updateSongMetadata(songId, metadataPayload);
+          const updatedMetadata = await backendApi.updateSongMetadata(songId, metadataPayload);
+          setSongs((current) =>
+            current.map((song) =>
+              song.id === songId
+                ? { ...song, importedPublishedSongId: updatedMetadata.importedPublishedSongId ?? null }
+                : song,
+            ),
+          );
         }
 
         if (hasChartUpdate) {
@@ -662,6 +723,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
         const nextSong = updateTimestamp({
           ...song,
           ...nextSongShape,
+          stringCount: nextSongShape.stringNames.length,
         });
         syncState.nextSongForSync = nextSong;
         return nextSong;
@@ -799,6 +861,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
             key: song.key,
             feelNote: song.feelNote,
             tuning: song.tuning,
+            stringCount: song.stringCount,
             chart: {
               stringNames: song.stringNames,
               rows: song.rows,

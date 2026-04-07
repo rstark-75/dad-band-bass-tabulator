@@ -8,7 +8,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { TabPagePreview } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
-import { resolveUpgradeTrigger, useSubscription } from '../features/subscription';
+import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { Song } from '../types/models';
@@ -67,6 +67,7 @@ const printCss = `
 
 export function SetlistExportScreen({ navigation }: Props) {
   const { tier } = useSubscription();
+  const { showUpgradePrompt } = useUpgradePrompt();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
   const { songs, setlist } = useBassTab();
   const [isCheckingPdfAccess, setIsCheckingPdfAccess] = useState(Boolean(backendApi));
@@ -76,6 +77,7 @@ export function SetlistExportScreen({ navigation }: Props) {
     .map((songId) => songs.find((song) => song.id === songId))
     .filter(Boolean) as Song[];
   const firstSongId = orderedSongs[0]?.id;
+  const firstSongStringCount = orderedSongs[0]?.stringCount ?? 4;
 
   useEffect(() => {
     let isMounted = true;
@@ -184,6 +186,9 @@ export function SetlistExportScreen({ navigation }: Props) {
               <Text style={styles.teaserMeta}>
                 {orderedSongs.length} song{orderedSongs.length === 1 ? '' : 's'} ready
               </Text>
+              <Text style={styles.lockedStringInfo}>
+                Strings: {firstSongStringCount}. Upgrade for 5 & 6-string stage-ready tabs.
+              </Text>
               <Text style={styles.teaserLabel}>Limited display</Text>
               {orderedSongs.slice(0, 4).map((song, index) => (
                 <Text key={song.id} style={styles.teaserItem}>
@@ -195,7 +200,7 @@ export function SetlistExportScreen({ navigation }: Props) {
             <View style={styles.lockedActions}>
               <PrimaryButton
                 label="Go Pro for PDF Export"
-                onPress={() => navigation.navigate('Upgrade')}
+                onPress={() => showUpgradePrompt('PDF_EXPORT')}
               />
               <PrimaryButton
                 label="Maybe Later"
@@ -273,6 +278,7 @@ export function SetlistExportScreen({ navigation }: Props) {
                   <View style={styles.metaGrid}>
                     <MetaPill label="Key" value={song.key} />
                     <MetaPill label="Tuning" value={song.tuning} />
+                    <MetaPill label="Strings" value={`${stringNames.length}`} />
                   </View>
                 </View>
 
@@ -490,6 +496,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: '#cbd5e1',
+  },
+  lockedStringInfo: {
+    fontSize: 13,
+    color: '#fbbf24',
   },
   teaserCard: {
     borderRadius: 16,

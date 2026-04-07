@@ -9,6 +9,8 @@ export const toSongMetadataDto = (song: Song): SongMetadataDto => ({
   feelNote: song.feelNote,
   tuning: song.tuning,
   updatedAt: song.updatedAt,
+  stringCount: song.stringCount,
+  importedPublishedSongId: song.importedPublishedSongId ?? null,
 });
 
 export const toSongChartDto = (song: Song): SongChartDto => ({
@@ -29,8 +31,10 @@ export const fromSongDto = (dto: SongDto): Song => ({
   feelNote: dto.feelNote,
   tuning: dto.tuning,
   updatedAt: dto.updatedAt,
+  stringCount: dto.stringCount,
   stringNames: dto.chart.stringNames,
   rows: dto.chart.rows,
+  importedPublishedSongId: dto.importedPublishedSongId ?? null,
 });
 
 export const toPlaylistDto = (setlist: Setlist): PlaylistDto => ({

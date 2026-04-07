@@ -8,7 +8,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { TabPagePreview } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
-import { resolveUpgradeTrigger, useSubscription } from '../features/subscription';
+import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { flattenSongRowsToChart } from '../utils/songChart';
@@ -56,6 +56,7 @@ const printCss = `
 export function SongExportScreen({ navigation, route }: Props) {
   const { songId } = route.params;
   const { tier } = useSubscription();
+  const { showUpgradePrompt } = useUpgradePrompt();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
   const { songs } = useBassTab();
   const song = songs.find((item) => item.id === songId);
@@ -132,6 +133,7 @@ export function SongExportScreen({ navigation, route }: Props) {
 
   const chart = flattenSongRowsToChart(song);
   const { stringNames, bars } = parseTab(chart.tab);
+  const stringCount = stringNames.length;
   const teaserTab = chart.tab.split('\n').slice(0, 4).join('\n');
 
   if (isCheckingPdfAccess) {
@@ -165,9 +167,12 @@ export function SongExportScreen({ navigation, route }: Props) {
           <View style={styles.lockedCard}>
             <Text style={styles.lockedEyebrow}>Pro Export</Text>
             <Text style={styles.lockedTitle}>Song PDF export is a Pro feature</Text>
-            <Text style={styles.lockedSubtitle}>
-              No Internet at GIG - then export your tabs to your device.
-            </Text>
+              <Text style={styles.lockedSubtitle}>
+                No Internet at GIG - then export your tabs to your device.
+              </Text>
+              <Text style={styles.lockedStringInfo}>
+                Strings: {stringCount}. Upgrade for 5 & 6-string stage-ready tabs.
+              </Text>
 
             <View style={styles.teaserCard}>
               <Text style={styles.teaserTitle}>{song.title}</Text>
@@ -181,7 +186,7 @@ export function SongExportScreen({ navigation, route }: Props) {
             <View style={styles.lockedActions}>
               <PrimaryButton
                 label="Go Pro for PDF Export"
-                onPress={() => navigation.navigate('Upgrade')}
+                onPress={() => showUpgradePrompt('PDF_EXPORT')}
               />
               <PrimaryButton
                 label="Maybe Later"
@@ -234,6 +239,7 @@ export function SongExportScreen({ navigation, route }: Props) {
             <View style={styles.metaGrid}>
               <MetaPill label="Key" value={song.key} />
               <MetaPill label="Tuning" value={song.tuning} />
+              <MetaPill label="Strings" value={`${stringCount}`} />
             </View>
           </View>
 
@@ -400,6 +406,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: '#cbd5e1',
+  },
+  lockedStringInfo: {
+    fontSize: 13,
+    color: '#fbbf24',
   },
   teaserCard: {
     borderRadius: 16,

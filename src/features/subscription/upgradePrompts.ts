@@ -48,6 +48,12 @@ export const upgradePromptContent: Record<UpgradeTrigger, UpgradePromptContent> 
     triggerMessage: 'No Internet at GIG - then export your tabs to your device.',
     features: proBenefits,
   },
+  STRING_LIMIT: {
+    title: 'Unlock Five-String Power',
+    valueStatement: 'Play every string count on stage-ready tabs.',
+    triggerMessage: 'Stage-ready strings beyond four require BassTab Pro.',
+    features: proBenefits,
+  },
 };
 
 export class UpgradeGateError extends Error {
@@ -69,6 +75,7 @@ const backendCodeToTrigger: Record<string, UpgradeTrigger> = {
   SVG_LOCKED: 'SVG_MODE',
   PDF_LOCKED: 'PDF_EXPORT',
   COMMUNITY_LIMIT: 'COMMUNITY_SAVE',
+  STRING_LIMIT: 'STRING_LIMIT',
 };
 
 export const resolveUpgradeTrigger = (error: unknown): UpgradeTrigger | null => {

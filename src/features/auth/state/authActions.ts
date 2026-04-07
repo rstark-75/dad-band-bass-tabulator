@@ -193,32 +193,16 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     dispatch({ type: 'setLoading', loadingAction: 'verifyCode' });
 
     try {
-      await requireApi().verifyCode({ userId, email: email || undefined, code });
-      const session = await resolveSessionAfterAuth();
-      dispatch({ type: 'setAuthenticated', user: session.user });
+      const authResponse = await requireApi().verifyCode({ userId, email: email || undefined, code });
+      dispatch({ type: 'setAuthenticated', user: authResponse.user });
       dispatch({
         type: 'setDraftSignIn',
-        userId: session.user.userId,
-        email: session.user.email,
-        avatarUrl: session.user.avatarUrl ?? '',
+        userId: authResponse.user.userId,
+        email: authResponse.user.email,
+        avatarUrl: authResponse.user.avatarUrl ?? '',
       });
       setError(null);
     } catch (error) {
-      try {
-        const session = await requireApi().getSession();
-        dispatch({ type: 'setAuthenticated', user: session.user });
-        dispatch({
-          type: 'setDraftSignIn',
-          userId: session.user.userId,
-          email: session.user.email,
-          avatarUrl: session.user.avatarUrl ?? '',
-        });
-        setError(null);
-        return;
-      } catch (_sessionError) {
-        // Continue to user-friendly verify error below.
-      }
-
       setError(toAuthErrorMessage('verifyCode', error));
     } finally {
       dispatch({ type: 'setLoading', loadingAction: null });
@@ -237,32 +221,16 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     dispatch({ type: 'setLoading', loadingAction: 'verifyLink' });
 
     try {
-      await requireApi().verifyLink(token.trim());
-      const session = await resolveSessionAfterAuth();
-      dispatch({ type: 'setAuthenticated', user: session.user });
+      const authResponse = await requireApi().verifyLink(token.trim());
+      dispatch({ type: 'setAuthenticated', user: authResponse.user });
       dispatch({
         type: 'setDraftSignIn',
-        userId: session.user.userId,
-        email: session.user.email,
-        avatarUrl: session.user.avatarUrl ?? '',
+        userId: authResponse.user.userId,
+        email: authResponse.user.email,
+        avatarUrl: authResponse.user.avatarUrl ?? '',
       });
       setError(null);
     } catch (error) {
-      try {
-        const session = await requireApi().getSession();
-        dispatch({ type: 'setAuthenticated', user: session.user });
-        dispatch({
-          type: 'setDraftSignIn',
-          userId: session.user.userId,
-          email: session.user.email,
-          avatarUrl: session.user.avatarUrl ?? '',
-        });
-        setError(null);
-        return;
-      } catch (_sessionError) {
-        // Continue to user-friendly verify error below.
-      }
-
       dispatch({ type: 'setUnauthenticated' });
       setError(toAuthErrorMessage('verifyLink', error));
     } finally {

@@ -215,6 +215,7 @@ export class AuthApi {
     const url = `${baseUrl}${path}`;
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      'ngrok-skip-browser-warning': 'true',
     };
 
     if (options.body !== undefined) {

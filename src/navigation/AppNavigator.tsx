@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { NavigationContainer, DefaultTheme, LinkingOptions } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DefaultTheme,
+  LinkingOptions,
+  getStateFromPath as getNativeStateFromPath,
+} from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +33,7 @@ import { UpgradeScreen } from '../screens/UpgradeScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { useBassTab } from '../store/BassTabProvider';
 import { RootStackParamList, TabParamList } from './types';
+import { SongEditorErrorBoundary } from '../components/SongEditorErrorBoundary';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
@@ -99,13 +105,28 @@ const webOrigin =
     ? ((globalThis as { location?: { origin?: string } }).location?.origin ?? '')
     : '';
 
-const linking: LinkingOptions<RootStackParamList> = {
+export const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [webOrigin, 'basstab://'].filter(Boolean),
   config: {
     screens: {
       AuthEntry: 'auth',
       AuthCallback: 'auth/callback',
+      MainTabs: {
+        path: 'MainTabs',
+        screens: {
+          Library: 'Library',
+          Setlist: 'Setlist',
+          Import: 'Community',
+        },
+      },
+      SongEditor: 'song/:songId',
+      PerformanceView: 'performance/:songId',
+      ExportSong: 'export/:songId',
     },
+  },
+  getStateFromPath: (path, options) => {
+    const normalizedPath = path?.replace('/MainTabs/MainTabs/', '/MainTabs/') ?? path;
+    return getNativeStateFromPath(normalizedPath, options);
   },
 };
 
@@ -205,11 +226,13 @@ export function AppNavigator() {
                 contentStyle: { backgroundColor: '#0b0b0f' },
               }}
             />
-            <Stack.Screen
-              name="SongEditor"
-              component={SongEditorScreen}
-              options={{ headerShown: false }}
-            />
+            <Stack.Screen name="SongEditor" options={{ headerShown: false }}>
+              {(props) => (
+                <SongEditorErrorBoundary>
+                  <SongEditorScreen {...props} />
+                </SongEditorErrorBoundary>
+              )}
+            </Stack.Screen>
             <Stack.Screen
               name="PerformanceView"
               component={LiveViewScreen}

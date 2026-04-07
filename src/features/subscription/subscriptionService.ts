@@ -1,10 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Linking from 'expo-linking';
 
 import { BassTabApi, createBassTabApiFromEnv } from '../../api';
 import {
+  BillingPortalSessionDto,
   SubscriptionCapabilityDefaultsDto,
+  SubscriptionDowngradeRequestDto,
+  SubscriptionDowngradeResponseDto,
   SubscriptionPricingDto,
   SubscriptionSnapshotDto,
+  SubscriptionUpgradeRequestDto,
+  SubscriptionUpgradeResponseDto,
 } from '../../api/contracts';
 import {
   BillingCurrency,
@@ -32,6 +38,7 @@ const defaultFreeSnapshot: SubscriptionSnapshot = {
     maxSetlists: 1,
     maxCommunitySongs: 2,
     maxCommunitySaves: 2,
+    maxStringCount: 4,
     svgEnabled: false,
   },
   communitySongsSaved: 0,
@@ -68,9 +75,12 @@ const mapSnapshot = (snapshot: SubscriptionSnapshotDto): SubscriptionSnapshot =>
     maxSetlists: snapshot.capabilities.maxSetlists,
     maxCommunitySongs: snapshot.capabilities.maxCommunitySongs,
     maxCommunitySaves: snapshot.capabilities.maxCommunitySaves,
+    maxStringCount: snapshot.capabilities.maxStringCount,
     svgEnabled: snapshot.capabilities.svgEnabled,
   },
 });
+
+export const mapSnapshotDto = mapSnapshot;
 
 const mapPricing = (pricing: SubscriptionPricingDto): SubscriptionPricing => ({
   plans: pricing.plans.map((plan) => ({
@@ -86,7 +96,10 @@ const mapPricing = (pricing: SubscriptionPricingDto): SubscriptionPricing => ({
 
 const defaultCapabilityDefaults: SubscriptionCapabilityDefaults = {
   free: defaultFreeSnapshot.capabilities,
-  pro: defaultFreeSnapshot.capabilities,
+  pro: {
+    ...defaultFreeSnapshot.capabilities,
+    maxStringCount: null,
+  },
 };
 
 const mapCapabilityDefaults = (
@@ -97,6 +110,7 @@ const mapCapabilityDefaults = (
     maxSetlists: defaults.free.maxSetlists,
     maxCommunitySongs: defaults.free.maxCommunitySongs,
     maxCommunitySaves: defaults.free.maxCommunitySaves,
+    maxStringCount: defaults.free.maxStringCount,
     svgEnabled: defaults.free.svgEnabled,
   },
   pro: {
@@ -104,6 +118,7 @@ const mapCapabilityDefaults = (
     maxSetlists: defaults.pro.maxSetlists,
     maxCommunitySongs: defaults.pro.maxCommunitySongs,
     maxCommunitySaves: defaults.pro.maxCommunitySaves,
+    maxStringCount: defaults.pro.maxStringCount,
     svgEnabled: defaults.pro.svgEnabled,
   },
 });
@@ -112,11 +127,16 @@ export interface SubscriptionService {
   loadSnapshot: () => Promise<SubscriptionSnapshot>;
   loadPricing: () => Promise<SubscriptionPricing>;
   loadCapabilityDefaults: () => Promise<SubscriptionCapabilityDefaults>;
-  upgradeToPro: (currency?: BillingCurrency) => Promise<SubscriptionSnapshot>;
+  upgradeToPro: (currency?: BillingCurrency) => Promise<SubscriptionUpgradeResponseDto>;
+  openBillingPortal: (returnUrl?: string) => Promise<SubscriptionDowngradeResponseDto>;
 }
 
 class HybridSubscriptionService implements SubscriptionService {
   private readonly api: BassTabApi | null = createBassTabApiFromEnv();
+
+  private buildUrl(path: string) {
+    return Linking.createURL(path);
+  }
 
   async loadSnapshot(): Promise<SubscriptionSnapshot> {
     if (!this.api) {
@@ -154,17 +174,33 @@ class HybridSubscriptionService implements SubscriptionService {
     return defaultCapabilityDefaults;
   }
 
-  async upgradeToPro(currency: BillingCurrency = 'GBP'): Promise<SubscriptionSnapshot> {
+  async upgradeToPro(currency: BillingCurrency = 'GBP'): Promise<SubscriptionUpgradeResponseDto> {
     if (!this.api) {
       throw new Error('Subscription upgrade requires backend API configuration.');
     }
 
-    const upgraded = await this.api.mockUpgrade({
+    const payload: SubscriptionUpgradeRequestDto = {
       planCode: 'PRO_MONTHLY',
       currency,
-    });
+      successUrl: this.buildUrl('subscription/success'),
+      cancelUrl: this.buildUrl('subscription/cancel'),
+    };
 
-    return mapSnapshot(upgraded);
+    console.info('[SubscriptionService] upgradeToPro payload', payload);
+
+    return this.api.upgrade(payload);
+  }
+
+  async openBillingPortal(returnUrl: string = 'subscription/portal'): Promise<SubscriptionDowngradeResponseDto> {
+    if (!this.api) {
+      throw new Error('Billing portal requires backend API configuration.');
+    }
+
+    const payload: SubscriptionDowngradeRequestDto = {
+      returnUrl: this.buildUrl(returnUrl),
+    };
+
+    return this.api.downgrade(payload);
   }
 }
 

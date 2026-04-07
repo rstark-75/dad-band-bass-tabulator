@@ -28,6 +28,7 @@ import {
   useSubscription,
   useUpgradePrompt,
 } from '../features/subscription';
+import { useAuth } from '../features/auth';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { CommunitySongAuthor, CommunitySongCard, SongChart } from '../types/models';
@@ -127,6 +128,8 @@ function toCommunitySongListItem(song: CommunitySongCardDto): CommunitySongListI
     },
     publishedAt: song.publishedAt,
     updatedAt: song.updatedAt,
+    version: song.version ?? null,
+    ownershipStatus: song.ownershipStatus ?? null,
   };
 }
 
@@ -143,18 +146,13 @@ function AuthorChip({ author, fallbackName, style }: AuthorChipProps) {
     return null;
   }
 
-  const handle = author?.userId?.trim();
-  const displayHandle = handle ? `@${handle}` : null;
-  const displayName = author?.displayName?.trim() || fallbackName?.trim() || displayHandle || 'Community';
+  const displayName = author?.displayName?.trim() || fallbackName?.trim() || 'Community';
   const avatarUri = author?.avatarUrl?.trim() ?? '';
   const showAvatarImage =
     !imageFailed &&
     (avatarUri.startsWith('http://') || avatarUri.startsWith('https://'));
   const fallbackInitial = displayName.slice(0, 1).toUpperCase() || 'A';
-  const authorLine =
-    displayHandle
-      ? `contributed by ${displayName === displayHandle ? displayHandle : `${displayName} (${displayHandle})`}`
-      : `contributed by ${displayName}`;
+  const authorLine = `contributed by ${displayName}`;
 
   return (
     <View style={[styles.authorRow, style]}>
@@ -210,16 +208,25 @@ export function ImportScreen({ navigation }: Props) {
     capabilityDefaults,
   } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
+  const { authState } = useAuth();
+  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
+  const currentUserDisplayName = authState.type === 'AUTHENTICATED' ? authState.user.displayName : null;
   const { songs, importSongFromDto } = useBassTab();
+  const importedPublishedSongIds = useMemo(
+    () => new Set(songs.map((s) => s.importedPublishedSongId).filter(Boolean) as string[]),
+    [songs],
+  );
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
   const [communityCatalog, setCommunityCatalog] = useState<CommunitySongListItem[]>([]);
   const [savedCommunitySongIds, setSavedCommunitySongIds] = useState<string[]>([]);
   const [savingSongId, setSavingSongId] = useState<string | null>(null);
+  const [adoptingSongId, setAdoptingSongId] = useState<string | null>(null);
   const [previewLoadingSongId, setPreviewLoadingSongId] = useState<string | null>(null);
   const [votingSongId, setVotingSongId] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<CommunityPreviewData | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [statusMessage, setStatusMessage] = useState('Browse community charts and save the ones you want to play.');
+  const [ownershipFilter, setOwnershipFilter] = useState<'ALL' | 'MINE' | 'UNCLAIMED'>('ALL');
 
   const hydrateCommunity = useCallback(async () => {
     if (!backendApi) {
@@ -280,6 +287,7 @@ export function ImportScreen({ navigation }: Props) {
     maxCommunitySaves: FREE_PLAN_LIMITS.communitySaves,
     maxSongs: FREE_PLAN_LIMITS.songs,
     maxSetlists: FREE_PLAN_LIMITS.setlists,
+    maxStringCount: FREE_PLAN_LIMITS.strings,
     svgEnabled: false,
   };
   const planCommunitySaveLimit =
@@ -453,7 +461,9 @@ export function ImportScreen({ navigation }: Props) {
       const { song: importedSongDto, status: importStatus } =
         await backendApi.importCommunitySong(importTargetId);
 
-      const importedSong = importSongFromDto(importedSongDto);
+      const importedSong = importSongFromDto(importedSongDto, {
+        importedPublishedSongId: importedSongDto.importedPublishedSongId ?? importTargetId,
+      });
 
       const nextSaveId = resolveCommunitySaveId(songForSave);
       setSavedCommunitySongIds((prevIds) => {
@@ -470,11 +480,6 @@ export function ImportScreen({ navigation }: Props) {
           : `Moved "${importedSong.title}" to your library.`;
       setStatusMessage(importedMessage);
 
-      try {
-        await refresh();
-      } catch (refreshError) {
-        console.warn('Subscription refresh failed after community save', refreshError);
-      }
     } catch (error) {
       const trigger = resolveUpgradeTrigger(error);
 
@@ -539,6 +544,58 @@ export function ImportScreen({ navigation }: Props) {
     }
   };
 
+  const handleAdopt = async (communityEntryId: string) => {
+    if (!backendApi || adoptingSongId) {
+      return;
+    }
+
+    const selectedSong = communityCatalog.find((song) => song.id === communityEntryId);
+
+    if (!selectedSong) {
+      return;
+    }
+
+    const publishedSongId = resolveCommunityDetailId(selectedSong);
+    setAdoptingSongId(selectedSong.id);
+
+    try {
+      const updatedCard = await backendApi.adoptCommunitySong(publishedSongId);
+
+      setCommunityCatalog((currentSongs) =>
+        currentSongs.map((song) =>
+          song.id === selectedSong.id
+            ? {
+              ...song,
+              ownershipStatus: updatedCard.ownershipStatus ?? 'ACTIVE',
+              version: updatedCard.version ?? song.version,
+              author: updatedCard.author
+                ? {
+                  userId: updatedCard.author.userId,
+                  displayName: updatedCard.author.displayName ?? null,
+                  avatarUrl: updatedCard.author.avatarUrl ?? null,
+                }
+                : song.author,
+            }
+            : song,
+        ),
+      );
+
+      setStatusMessage(`You are now the owner of "${selectedSong.title}".`);
+    } catch (error) {
+      const trigger = resolveUpgradeTrigger(error);
+
+      if (trigger) {
+        showUpgradePrompt(trigger);
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : 'Could not adopt this song.';
+      setStatusMessage(message);
+    } finally {
+      setAdoptingSongId(null);
+    }
+  };
+
   return (
     <ScreenContainer>
       <View style={styles.header}>
@@ -560,27 +617,45 @@ export function ImportScreen({ navigation }: Props) {
         <Text style={styles.planTitle}>
           {tier === 'PRO' ? 'Pro Community Access' : 'Free Community Access'}
         </Text>
-        <Text style={styles.planText}>
-          {hasCommunityLimit
-            ? `${communitySongsSaved} of ${planCommunitySaveLimit} community saves used`
-            : 'Unlimited community saves'}
-        </Text>
-        {hasCommunityLimit && planCommunitySaveLimit > communitySongsSaved ? (
+        {tier !== 'PRO' ? (
+          <Text style={styles.planText}>
+            {hasCommunityLimit
+              ? `${communitySongsSaved} of ${planCommunitySaveLimit} community saves used`
+              : 'Unlimited community saves'}
+          </Text>
+        ) : null}
+        {tier !== 'PRO' && hasCommunityLimit && planCommunitySaveLimit > communitySongsSaved ? (
           <Text style={styles.planSubText}>
             Unlock unlimited saves to keep every community chart you love.
           </Text>
         ) : null}
-        <Pressable
-          style={styles.proLink}
-          onPress={() => {
-            navigation.navigate('Upgrade');
-          }}
-        >
-          <Text style={styles.proLinkText}>See Pro benefits →</Text>
-        </Pressable>
+        {tier !== 'PRO' ? (
+          <Pressable
+            style={styles.proLink}
+            onPress={() => {
+              navigation.navigate('Upgrade');
+            }}
+          >
+            <Text style={styles.proLinkText}>See Pro benefits →</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <Text style={styles.statusText}>{statusMessage}</Text>
+
+      <View style={styles.filterRow}>
+        {(['ALL', 'MINE', 'UNCLAIMED'] as const).map((filter) => (
+          <Pressable
+            key={filter}
+            style={[styles.filterTab, ownershipFilter === filter && styles.filterTabActive]}
+            onPress={() => setOwnershipFilter(filter)}
+          >
+            <Text style={[styles.filterTabText, ownershipFilter === filter && styles.filterTabTextActive]}>
+              {filter === 'ALL' ? 'All' : filter === 'MINE' ? 'Mine' : 'Orphaned'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       {loadingCatalog ? (
         <EmptyState
@@ -593,11 +668,37 @@ export function ImportScreen({ navigation }: Props) {
           description="Check back soon for shared songs."
         />
       ) : (
-        communityCatalog.map((song) => {
+        communityCatalog
+          .filter((song) => {
+            if (ownershipFilter === 'MINE') {
+              return song.ownershipStatus !== 'ORPHANED' &&
+                Boolean(currentUserId) &&
+                song.author?.userId === currentUserId;
+            }
+            if (ownershipFilter === 'UNCLAIMED') {
+              return song.ownershipStatus === 'ORPHANED';
+            }
+            return true;
+          })
+          .map((song) => {
           const isSaving = savingSongId === song.id;
+          const isAdopting = adoptingSongId === song.id;
           const isPreviewLoading = previewLoadingSongId === song.id;
-          const isVoting = votingSongId === song.id;
           const dateLabel = formatPublishedDateLabel(song.publishedAt ?? song.updatedAt ?? null);
+          const saveId = resolveCommunitySaveId(song);
+          const publishedId = song.publishedSongId ?? song.id;
+          const hasCommunitySave = savedCommunitySongIds.includes(saveId);
+          const isInLibrary =
+            importedPublishedSongIds.has(publishedId) || importedPublishedSongIds.has(saveId);
+          const limitReached =
+            hasCommunityLimit && communitySongsSaved >= planCommunitySaveLimit && !hasCommunitySave;
+          const isOrphaned = song.ownershipStatus === 'ORPHANED';
+          const isOwner =
+            !isOrphaned &&
+            Boolean(currentUserId) &&
+            Boolean(song.author?.userId) &&
+            song.author?.userId === currentUserId;
+          const canAdopt = isOrphaned && tier === 'PRO';
 
           return (
             <SongListItem
@@ -607,9 +708,12 @@ export function ImportScreen({ navigation }: Props) {
               artist={song.artist}
               keySignature={song.key ?? 'E'}
               tuning={song.tuning ?? 'EADG'}
-              contributorName={song.author?.displayName ?? song.author?.userId}
-              contributorEmoji={song.author ? '👤' : undefined}
-              contributionDate={dateLabel}
+              version={song.version}
+              claimStatus={isOwner ? 'yours' : isOrphaned ? 'unclaimed' : 'claimed'}
+              isOrphaned={isOrphaned}
+              contributorName={isOrphaned ? undefined : (isOwner ? (currentUserDisplayName ?? song.author?.displayName ?? 'You') : (song.author?.displayName ?? 'Community'))}
+              contributorAvatarUrl={isOrphaned ? null : (song.author?.avatarUrl ?? null)}
+              contributionDate={isOrphaned ? undefined : dateLabel}
               voteScore={song.votes.upVotes - song.votes.downVotes}
               userVote={song.votes.currentUserVote}
               onPreview={() => {
@@ -621,11 +725,49 @@ export function ImportScreen({ navigation }: Props) {
               onDownVote={() => {
                 void handleVote(song.id, 'DOWN');
               }}
-              actionLabel={isSaving ? 'Moving...' : 'Copy Song to Library'}
-              onAction={() => {
-                void handleSaveCommunitySong(song.id);
-              }}
-              actionDisabled={isSaving || isPreviewLoading}
+              actionLabel={
+                isOwner
+                  ? song.ownershipStatus === 'ORPHANED'
+                    ? 'Disowned'
+                    : 'Your Song'
+                  : isSaving
+                    ? 'Moving...'
+                    : isInLibrary
+                      ? 'Already saved'
+                      : limitReached
+                        ? 'Upgrade for more saves'
+                        : 'Copy Song to Library'
+              }
+              onAction={
+                isOwner
+                  ? undefined
+                  : () => {
+                    if (limitReached) {
+                      showUpgradePrompt('COMMUNITY_SAVE');
+                      return;
+                    }
+
+                    void handleSaveCommunitySong(song.id);
+                  }
+              }
+              actionDisabled={isOwner || isSaving || isPreviewLoading || limitReached || isInLibrary}
+              secondaryActionLabel={
+                canAdopt
+                  ? isAdopting
+                    ? 'Adopting...'
+                    : 'Adopt Song'
+                  : isOrphaned && tier !== 'PRO'
+                    ? 'Adopt (Pro)'
+                    : undefined
+              }
+              onSecondaryAction={
+                canAdopt
+                  ? () => { void handleAdopt(song.id); }
+                  : isOrphaned && tier !== 'PRO'
+                    ? () => { showUpgradePrompt('COMMUNITY_SAVE'); }
+                    : undefined
+              }
+              secondaryActionDisabled={isAdopting || isSaving || isPreviewLoading}
             />
           );
         })
@@ -642,12 +784,12 @@ export function ImportScreen({ navigation }: Props) {
             {previewData ? (
               <>
                 <View style={styles.previewHeader}>
-                  <Text style={styles.previewTitle}>{previewData.title}</Text>
-                  <Text style={styles.previewMeta}>
-                    {previewData.artist} • {previewData.key} • {previewData.tuning}
-                  </Text>
-                  <AuthorChip author={previewData.author} fallbackName={previewData.artist} />
-                </View>
+              <Text style={styles.previewTitle}>{previewData.title}</Text>
+              <Text style={styles.previewMeta}>
+                {previewData.artist} • {previewData.key} • {previewData.tuning}
+              </Text>
+              <AuthorChip author={previewData.author} fallbackName={previewData.artist} />
+            </View>
 
                 <ScrollView
                   style={styles.previewScroll}
@@ -738,6 +880,30 @@ const styles = StyleSheet.create({
   },
   songRow: {
     marginVertical: 6,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  filterTab: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: 'transparent',
+  },
+  filterTabActive: {
+    backgroundColor: palette.primary,
+    borderColor: palette.primary,
+  },
+  filterTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94a3b8',
+  },
+  filterTabTextActive: {
+    color: '#f8fafc',
   },
   authorRow: {
     flexDirection: 'row',

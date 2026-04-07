@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { Pressable, StyleProp, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import {
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  ViewStyle,
+  TextStyle,
+} from 'react-native';
 
 import { palette } from '../constants/colors';
 import { tuningOptions } from '../constants/tunings';
@@ -10,49 +19,109 @@ interface SongMetaFieldsProps {
   onFieldChange: <K extends keyof Song>(field: K, value: Song[K]) => void;
   compact?: boolean;
   lockMetadata?: boolean;
+  stringCountOptions?: number[];
 }
+
+const StringCountSelector = ({
+  value,
+  options,
+  onSelect,
+  disabled,
+}: {
+  value: number;
+  options: number[];
+  onSelect: (value: number) => void;
+  disabled?: boolean;
+}) => (
+  <View style={[styles.stringCountSelector, disabled && styles.selectorDisabled]}>
+    {(options.length > 0 ? options : [4, 5]).map((option) => (
+      <Pressable
+        key={option}
+        disabled={disabled}
+        onPress={() => onSelect(option)}
+        style={({ pressed }) => [
+          styles.stringCountPill,
+          option === value && styles.stringCountPillActive,
+          pressed && !disabled && styles.stringCountPillPressed,
+        ]}
+      >
+        <Text
+          style={[
+            styles.stringCountPillText,
+            option === value && styles.stringCountPillTextActive,
+          ]}
+        >
+          {option}
+        </Text>
+      </Pressable>
+    ))}
+  </View>
+);
 
 export function SongMetaFields({
   song,
   onFieldChange,
   compact = false,
   lockMetadata = false,
+  stringCountOptions,
 }: SongMetaFieldsProps) {
   return (
     <View style={[styles.card, compact && styles.compactCard]}>
       {!compact ? <Text style={styles.title}>Song Details</Text> : null}
 
       <View style={styles.grid}>
-        <Field
-          label="Title"
-          value={song.title}
-          onChangeText={(value) => onFieldChange('title', value)}
-          style={compact ? styles.titleFieldCompact : undefined}
-          disabled={lockMetadata}
-        />
-        <Field
-          label="Artist"
-          value={song.artist}
-          onChangeText={(value) => onFieldChange('artist', value)}
-          style={compact ? styles.artistFieldCompact : undefined}
-          disabled={lockMetadata}
-        />
-        <Field
-          label="Key"
-          value={song.key}
-          onChangeText={(value) => onFieldChange('key', value)}
-          compact
-          style={compact ? styles.keyFieldCompact : undefined}
-          disabled={lockMetadata}
-        />
-        <Field
-          label="Tuning"
-          value={song.tuning}
-          onChangeText={(value) => onFieldChange('tuning', value)}
-          options={tuningOptions as unknown as string[]}
-          style={compact ? styles.tuningFieldCompact : undefined}
-          disabled={lockMetadata}
-        />
+        <View style={[styles.row, compact && styles.rowCompact]}>
+          <Field
+            label="Title"
+            value={song.title}
+            onChangeText={(value) => onFieldChange('title', value)}
+            style={[styles.titleField, compact && styles.titleFieldCompact]}
+            inputStyle={styles.titleArtistInput}
+            disabled={lockMetadata}
+          />
+          <Field
+            label="Artist"
+            value={song.artist}
+            onChangeText={(value) => onFieldChange('artist', value)}
+            style={[styles.artistField, compact && styles.artistFieldCompact]}
+            inputStyle={styles.titleArtistInput}
+            disabled={lockMetadata}
+          />
+          <View
+            style={[
+              styles.field,
+              compact && styles.compactField,
+              styles.stringField,
+            ]}
+          >
+            <Text style={[styles.label, lockMetadata && styles.labelDisabled]}>Strings</Text>
+            <StringCountSelector
+              value={song.stringCount}
+              options={stringCountOptions ?? [4, 5]}
+              onSelect={(value) => onFieldChange('stringCount', value)}
+              disabled={lockMetadata}
+            />
+          </View>
+        </View>
+        <View style={[styles.row, compact && styles.rowCompact]}>
+          <Field
+            label="Key"
+            value={song.key}
+            onChangeText={(value) => onFieldChange('key', value)}
+            compact
+            style={[styles.keyField, compact && styles.keyFieldCompact]}
+            disabled={lockMetadata}
+          />
+          <Field
+            label="Tuning"
+            value={song.tuning}
+            onChangeText={(value) => onFieldChange('tuning', value)}
+            options={tuningOptions as unknown as string[]}
+            style={[styles.tuningField, compact && styles.tuningFieldCompact]}
+            inputStyle={styles.tuningInput}
+            disabled={lockMetadata}
+          />
+        </View>
       </View>
     </View>
   );
@@ -66,6 +135,7 @@ interface FieldProps {
   keyboardType?: 'default' | 'numeric';
   options?: string[];
   style?: StyleProp<ViewStyle>;
+  inputStyle?: StyleProp<TextStyle>;
   disabled?: boolean;
 }
 
@@ -77,6 +147,7 @@ function Field({
   keyboardType = 'default',
   options,
   style,
+  inputStyle,
   disabled = false,
 }: FieldProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -107,35 +178,35 @@ function Field({
         {isOpen ? (
           <View style={styles.dropdownMenu}>
             {options.map((option) => (
-                <Pressable
-                  key={option}
-                  onPress={() => {
-                    if (disabled) {
-                      return;
-                    }
+              <Pressable
+                key={option}
+                onPress={() => {
+                  if (disabled) {
+                    return;
+                  }
 
-                    onChangeText(option);
-                    setIsOpen(false);
-                  }}
-                  style={({ pressed }) => [
-                    styles.dropdownOption,
-                    option === value && styles.dropdownOptionActive,
-                    pressed && !disabled && styles.pressed,
+                  onChangeText(option);
+                  setIsOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.dropdownOption,
+                  option === value && styles.dropdownOptionActive,
+                  pressed && !disabled && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dropdownOptionText,
+                    option === value && styles.dropdownOptionTextActive,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.dropdownOptionText,
-                      option === value && styles.dropdownOptionTextActive,
-                    ]}
-                  >
-                    {option}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </View>
+                  {option}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
       );
     }
 
@@ -146,7 +217,7 @@ function Field({
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType}
-        style={[styles.input, disabled && styles.inputDisabled]}
+        style={[styles.input, disabled && styles.inputDisabled, inputStyle]}
         placeholderTextColor={palette.textMuted}
         editable={!disabled}
       />
@@ -176,35 +247,72 @@ const styles = StyleSheet.create({
     color: palette.text,
   },
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
     gap: 10,
     width: '100%',
   },
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+    width: '100%',
+    alignItems: 'flex-start',
+  },
+  rowCompact: {
+    gap: 5,
+    flexWrap: 'nowrap',
+    alignItems: 'flex-end',
+  },
   field: {
     gap: 5,
-    width: 220,
-    maxWidth: '100%',
+    flex: 1,
+    minWidth: 100,
   },
   compactField: {
-    width: 120,
+    gap: 3,
+    minWidth: 0,
+  },
+  titleField: {
+    flexGrow: 2,
+    minWidth: 120,
+  },
+  artistField: {
+    flexGrow: 2,
+    minWidth: 120,
   },
   titleFieldCompact: {
-    width: '35%',
-    flexGrow: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   artistFieldCompact: {
-    width: '35%',
-    flexGrow: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   keyFieldCompact: {
-    width: 72,
     flexGrow: 0,
     flexShrink: 0,
+    minWidth: 0,
+    width: 52,
+  },
+  keyField: {
+    flexBasis: 100,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 80,
   },
   tuningFieldCompact: {
-    width: '20%',
     flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 0,
+    width: 80,
+  },
+  tuningField: {
+    flexBasis: 110,
+    flexGrow: 0,
+    flexShrink: 1,
+    minWidth: 80,
   },
   dropdownField: {
     zIndex: 20,
@@ -218,16 +326,18 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   input: {
-    minHeight: 42,
-    borderRadius: 12,
+    minHeight: 32,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: palette.border,
     backgroundColor: '#f8fafc',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     color: palette.text,
-    fontSize: 15,
+    fontSize: 13,
   },
+  tuningInput: {},
+  titleArtistInput: {},
   inputDisabled: {
     backgroundColor: '#e5e7eb',
     borderColor: '#cbd5e1',
@@ -236,12 +346,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 8,
   },
   selectValue: {
     flex: 1,
     color: palette.text,
-    fontSize: 15,
+    fontSize: 13,
   },
   selectChevron: {
     fontSize: 12,
@@ -273,5 +383,43 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.88,
+  },
+  stringField: {
+    flex: 0,
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 0,
+    width: 'auto',
+  },
+  stringCountSelector: {
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 2,
+  },
+  stringCountPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: palette.surfaceMuted,
+    minWidth: 32,
+    alignItems: 'center',
+  },
+  stringCountPillActive: {
+    backgroundColor: palette.primary,
+  },
+  stringCountPillPressed: {
+    opacity: 0.75,
+  },
+  stringCountPillText: {
+    color: palette.text,
+    fontWeight: '600',
+  },
+  stringCountPillTextActive: {
+    color: '#f8fafc',
+  },
+  selectorDisabled: {
+    opacity: 0.4,
   },
 });

@@ -8,6 +8,8 @@ export interface SongMetadataDto {
   feelNote: string;
   tuning: string;
   updatedAt: string;
+  stringCount: number;
+  importedPublishedSongId?: string | null;
 }
 
 export interface SongChartDto {
@@ -33,6 +35,7 @@ export interface CreateSongRequestDto {
   feelNote: string;
   tuning: string;
   chart: SongChartDto;
+  stringCount: number;
 }
 
 export interface UpdateSongMetadataRequestDto {
@@ -41,6 +44,7 @@ export interface UpdateSongMetadataRequestDto {
   key?: string;
   feelNote?: string;
   tuning?: string;
+  stringCount?: number;
 }
 
 export interface ReplaceSongChartRequestDto {
@@ -60,6 +64,7 @@ export interface SubscriptionCapabilitiesDto {
   maxSetlists: number | null;
   maxCommunitySongs: number | null;
   maxCommunitySaves: number | null;
+  maxStringCount: number | null;
   svgEnabled: boolean;
 }
 
@@ -93,6 +98,38 @@ export interface SubscriptionPricingDto {
   plans: SubscriptionPlanDto[];
 }
 
+export interface CheckoutSessionDto {
+  sessionId: string;
+  checkoutUrl: string;
+}
+
+export interface SubscriptionUpgradeRequestDto {
+  planCode: string;
+  successUrl: string;
+  cancelUrl: string;
+  currency?: BillingCurrencyDto;
+}
+
+export interface SubscriptionUpgradeResponseDto {
+  mode: 'MOCK' | 'STRIPE';
+  checkoutSession?: CheckoutSessionDto;
+  snapshot: SubscriptionSnapshotDto | null;
+}
+
+export interface BillingPortalSessionDto {
+  portalUrl: string;
+}
+
+export interface SubscriptionDowngradeRequestDto {
+  returnUrl: string;
+}
+
+export interface SubscriptionDowngradeResponseDto {
+  mode: 'MOCK' | 'STRIPE';
+  portalSession?: BillingPortalSessionDto;
+  snapshot: SubscriptionSnapshotDto;
+}
+
 export interface SubscriptionCapabilityDefaultsDto {
   free: SubscriptionCapabilitiesDto;
   pro: SubscriptionCapabilitiesDto;
@@ -104,6 +141,7 @@ export interface MockUpgradeRequestDto {
 }
 
 export type PublishedSongStatusDto = 'PUBLISHED' | 'UNLISTED' | 'MODERATION_HIDDEN';
+export type OwnershipStatusDto = 'ACTIVE' | 'ORPHANED';
 
 export interface CommunitySongAuthorDto {
   userId: string;
@@ -133,6 +171,9 @@ export interface CommunitySongCardDto {
   publishedAt: string;
   updatedAt: string;
   status?: PublishedSongStatusDto;
+  stringCount?: number | null;
+  version?: number | null;
+  ownershipStatus?: OwnershipStatusDto | null;
 }
 
 export interface CommunitySongDetailDto extends CommunitySongCardDto {
@@ -203,7 +244,8 @@ const isSongMetadataDto = (value: unknown): value is SongMetadataDto => {
     typeof value.key === 'string' &&
     typeof value.feelNote === 'string' &&
     typeof value.tuning === 'string' &&
-    typeof value.updatedAt === 'string'
+    typeof value.updatedAt === 'string' &&
+    typeof value.stringCount === 'number'
   );
 };
 
@@ -227,6 +269,7 @@ const subscriptionTiers: SubscriptionTierDto[] = ['FREE', 'PRO'];
 const subscriptionStatuses: SubscriptionStatusDto[] = ['FREE', 'TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELLED', 'EXPIRED'];
 const billingCurrencies: BillingCurrencyDto[] = ['GBP', 'USD', 'EUR'];
 const publishedSongStatuses: PublishedSongStatusDto[] = ['PUBLISHED', 'UNLISTED', 'MODERATION_HIDDEN'];
+const ownershipStatuses: OwnershipStatusDto[] = ['ACTIVE', 'ORPHANED'];
 const communityVoteDirections: CommunitySongVoteDirectionDto[] = ['UP', 'DOWN'];
 
 const isNullableString = (value: unknown): value is string | null =>
@@ -248,6 +291,7 @@ const isSubscriptionCapabilitiesDto = (value: unknown): value is SubscriptionCap
     isNullableNumber(value.maxSetlists) &&
     isNullableNumber(value.maxCommunitySongs) &&
     isNullableNumber(value.maxCommunitySaves) &&
+    isNullableNumber(value.maxStringCount) &&
     typeof value.svgEnabled === 'boolean'
   );
 };
@@ -453,6 +497,12 @@ const toCommunitySongCardDto = (value: unknown): CommunitySongCardDto => {
       typeof value.status === 'string'
         ? (value.status as PublishedSongStatusDto)
         : undefined,
+    version: typeof value.version === 'number' ? value.version : null,
+    ownershipStatus:
+      typeof value.ownershipStatus === 'string' &&
+      ownershipStatuses.includes(value.ownershipStatus as OwnershipStatusDto)
+        ? (value.ownershipStatus as OwnershipStatusDto)
+        : null,
   };
 };
 
@@ -563,6 +613,48 @@ export const parseSubscriptionSnapshotDto = (value: unknown): SubscriptionSnapsh
   return value;
 };
 
+const isCheckoutSessionDto = (value: unknown): value is CheckoutSessionDto =>
+  isRecord(value) &&
+  typeof value.sessionId === 'string' &&
+  typeof value.checkoutUrl === 'string';
+
+const isBillingPortalSessionDto = (value: unknown): value is BillingPortalSessionDto =>
+  isRecord(value) && typeof value.portalUrl === 'string';
+
+const isSubscriptionUpgradeResponseDto = (value: unknown): value is SubscriptionUpgradeResponseDto =>
+  isRecord(value) &&
+  (value.mode === 'MOCK' || value.mode === 'STRIPE') &&
+  (value.snapshot === null || isSubscriptionSnapshotDto(value.snapshot)) &&
+  (value.checkoutSession === undefined || isCheckoutSessionDto(value.checkoutSession));
+
+const isSubscriptionDowngradeResponseDto = (
+  value: unknown,
+): value is SubscriptionDowngradeResponseDto =>
+  isRecord(value) &&
+  (value.mode === 'MOCK' || value.mode === 'STRIPE') &&
+  isSubscriptionSnapshotDto(value.snapshot) &&
+  (value.portalSession === undefined || isBillingPortalSessionDto(value.portalSession));
+
+export const parseSubscriptionUpgradeResponseDto = (
+  value: unknown,
+): SubscriptionUpgradeResponseDto => {
+  if (!isSubscriptionUpgradeResponseDto(value)) {
+    throw new Error('Invalid subscription upgrade response payload.');
+  }
+
+  return value;
+};
+
+export const parseSubscriptionDowngradeResponseDto = (
+  value: unknown,
+): SubscriptionDowngradeResponseDto => {
+  if (!isSubscriptionDowngradeResponseDto(value)) {
+    throw new Error('Invalid subscription downgrade response payload.');
+  }
+
+  return value;
+};
+
 const isBillingCurrencyDto = (value: unknown): value is BillingCurrencyDto =>
   typeof value === 'string' && billingCurrencies.includes(value as BillingCurrencyDto);
 
@@ -630,6 +722,9 @@ export const parseCommunitySongCardListDto = (value: unknown): CommunitySongCard
 
   return value.map(toCommunitySongCardDto);
 };
+
+export const parseCommunitySongCardDto = (value: unknown): CommunitySongCardDto =>
+  toCommunitySongCardDto(value);
 
 export const parseCommunitySongDetailDto = (value: unknown): CommunitySongDetailDto => {
   return toCommunitySongDetailDto(value);

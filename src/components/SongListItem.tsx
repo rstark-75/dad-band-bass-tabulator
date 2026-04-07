@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { GestureResponderEvent, Image, Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { useState } from 'react';
 
 import { palette } from '../constants/colors';
 
@@ -7,8 +8,11 @@ export type SongListItemProps = {
   artist: string;
   keySignature: string;
   tuning: string;
+  version?: number | null;
+  claimStatus?: 'yours' | 'claimed' | 'unclaimed';
+  isOrphaned?: boolean;
   contributorName?: string;
-  contributorEmoji?: string;
+  contributorAvatarUrl?: string | null;
   contributionDate?: string;
   voteScore: number;
   userVote: 'UP' | 'DOWN' | null;
@@ -18,6 +22,9 @@ export type SongListItemProps = {
   onAction?: () => void;
   actionLabel?: string;
   actionDisabled?: boolean;
+  onSecondaryAction?: () => void;
+  secondaryActionLabel?: string;
+  secondaryActionDisabled?: boolean;
   onMenu?: () => void;
   style?: ViewStyle;
 };
@@ -27,8 +34,11 @@ export function SongListItem({
   artist,
   keySignature,
   tuning,
+  version,
+  claimStatus,
+  isOrphaned,
   contributorName,
-  contributorEmoji,
+  contributorAvatarUrl,
   contributionDate,
   voteScore,
   userVote,
@@ -38,24 +48,45 @@ export function SongListItem({
   onAction,
   actionLabel,
   actionDisabled,
+  onSecondaryAction,
+  secondaryActionLabel,
+  secondaryActionDisabled,
   onMenu,
   style,
 }: SongListItemProps) {
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const highlightUp = userVote === 'UP';
   const highlightDown = userVote === 'DOWN';
+  const avatarUri = contributorAvatarUrl?.trim() ?? '';
+  const showAvatarImage = !avatarFailed && (avatarUri.startsWith('http://') || avatarUri.startsWith('https://'));
+  const avatarInitial = contributorName?.slice(0, 1).toUpperCase() ?? '?';
+  const handleActionPress = (event: GestureResponderEvent, callback?: () => void) => {
+    event.stopPropagation();
+    callback?.();
+  };
   return (
-    <View style={[styles.container, style]}>
+    <Pressable
+      onPress={onPreview}
+      style={({ pressed }) => [
+        styles.container,
+        pressed && styles.containerPressed,
+        style,
+      ]}
+    >
       <View style={styles.voteColumn}>
         <Pressable onPress={onUpVote} style={highlightUp ? styles.voteHighlight : undefined}>
           <Text style={[styles.voteArrow, highlightUp && styles.voteArrowActive]}>▲</Text>
         </Pressable>
         <Text style={styles.voteScore}>{voteScore}</Text>
-        <Pressable onPress={onDownVote} style={highlightDown ? styles.voteHighlight : undefined}>
+        <Pressable
+          onPress={onDownVote}
+          style={highlightDown ? styles.voteHighlight : undefined}
+        >
           <Text style={[styles.voteArrow, highlightDown && styles.voteArrowActive]}>▼</Text>
         </Pressable>
       </View>
 
-      <Pressable style={styles.content} onPress={onPreview}>
+      <View style={styles.content}>
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
@@ -69,39 +100,90 @@ export function SongListItem({
           <View style={styles.chip}>
             <Text style={styles.chipText}>{tuning}</Text>
           </View>
+          {version != null ? (
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>v{version}</Text>
+            </View>
+          ) : null}
+          {claimStatus != null ? (
+            <View style={[
+              styles.chip,
+              claimStatus === 'yours' && styles.chipYours,
+              claimStatus === 'unclaimed' && styles.chipUnclaimed,
+            ]}>
+              <Text style={[
+                styles.chipText,
+                claimStatus === 'yours' && styles.chipTextYours,
+                claimStatus === 'unclaimed' && styles.chipTextUnclaimed,
+              ]}>
+                {claimStatus === 'yours' ? 'Yours' : claimStatus === 'unclaimed' ? 'Orphaned' : 'Owned'}
+              </Text>
+            </View>
+          ) : null}
         </View>
-        {(contributorName || contributionDate) && (
-          <Text style={styles.contributorHint} numberOfLines={1}>
-            {contributorEmoji ? `${contributorEmoji} ` : ''}
-            {contributorName ? contributorName : 'Community contributor'}
-            {contributionDate ? ` • ${contributionDate}` : ''}
-          </Text>
-        )}
-      </Pressable>
+        {!isOrphaned && (contributorName || contributionDate) ? (
+          <View style={styles.contributorRow}>
+            <View style={styles.contributorAvatar}>
+              {showAvatarImage ? (
+                <Image
+                  source={{ uri: avatarUri }}
+                  style={styles.contributorAvatarImage}
+                  onError={() => setAvatarFailed(true)}
+                />
+              ) : (
+                <Text style={styles.contributorAvatarInitial}>{avatarInitial}</Text>
+              )}
+            </View>
+            <Text style={styles.contributorHint} numberOfLines={1}>
+              {contributorName ?? 'Community'}
+              {contributionDate ? ` • ${contributionDate}` : ''}
+            </Text>
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.actionsColumn}>
-        {actionLabel && onAction ? (
+        {actionLabel ? (
           <Pressable
-            onPress={onAction}
-            disabled={actionDisabled}
+            onPress={onAction ? (event) => handleActionPress(event, onAction) : undefined}
+            disabled={actionDisabled || !onAction}
             style={({ pressed }) => [
               styles.actionButton,
-              actionDisabled && styles.actionDisabled,
-              pressed && !actionDisabled && styles.actionPressed,
+              (actionDisabled || !onAction) && styles.actionDisabled,
+              pressed && !actionDisabled && onAction && styles.actionPressed,
             ]}
           >
-            <Text style={[styles.actionText, actionDisabled && styles.actionTextDisabled]}>
+            <Text style={[styles.actionText, (actionDisabled || !onAction) && styles.actionTextDisabled]}>
               {actionLabel}
             </Text>
           </Pressable>
         ) : null}
+        {secondaryActionLabel && onSecondaryAction ? (
+          <Pressable
+            onPress={(event) => handleActionPress(event, onSecondaryAction)}
+            disabled={secondaryActionDisabled}
+            style={({ pressed }) => [
+              styles.actionButton,
+              styles.secondaryActionButton,
+              secondaryActionDisabled && styles.actionDisabled,
+              pressed && !secondaryActionDisabled && styles.actionPressed,
+            ]}
+          >
+            <Text style={[styles.actionText, styles.secondaryActionText, secondaryActionDisabled && styles.actionTextDisabled]}>
+              {secondaryActionLabel}
+            </Text>
+          </Pressable>
+        ) : null}
         {onMenu ? (
-          <Pressable onPress={onMenu} style={styles.menuButton}>
+          <Pressable
+            onPress={(event) => handleActionPress(event, onMenu)}
+            style={styles.menuButton}
+          >
             <Text style={styles.menuText}>⋯</Text>
           </Pressable>
         ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -125,15 +207,19 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    padding: 14,
-    borderRadius: 16,
+    padding: 12,
+    borderRadius: 18,
     backgroundColor: palette.surface,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(148, 163, 184, 0.5)',
     gap: 12,
   },
+  containerPressed: {
+    backgroundColor: '#020617',
+    borderColor: '#475569',
+  },
   voteColumn: {
-    width: 56,
+    width: 50,
     justifyContent: 'space-between',
     alignItems: 'center',
   },
@@ -174,22 +260,88 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   chip: {
-    borderRadius: 12,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#d6d3d1',
+    borderColor: '#c7d2fe',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    backgroundColor: '#f5f5f4',
+    backgroundColor: 'rgba(147, 191, 255, 0.08)',
   },
   chipText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: palette.textMuted,
+    letterSpacing: 0.5,
+  },
+  chipYours: {
+    borderColor: palette.primary,
+    backgroundColor: 'rgba(15, 118, 110, 0.12)',
+  },
+  chipTextYours: {
+    color: palette.primary,
+  },
+  chipUnclaimed: {
+    borderColor: '#f59e0b',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+  },
+  chipTextUnclaimed: {
+    color: '#b45309',
+  },
+  contributorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  contributorAvatar: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: '#dbeafe',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  contributorAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  contributorAvatarInitial: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#1e3a8a',
   },
   contributorHint: {
     fontSize: 11,
     color: '#9ca3af',
+    flex: 1,
+  },
+  orphanBadge: {
+    alignSelf: 'flex-start',
     marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+  },
+  orphanBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#f59e0b',
+    letterSpacing: 0.5,
+  },
+  secondaryActionButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: palette.primary,
+  },
+  secondaryActionText: {
+    color: palette.primary,
   },
   actionsColumn: {
     justifyContent: 'space-between',

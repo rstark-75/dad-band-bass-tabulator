@@ -25,6 +25,7 @@ export interface SongChart {
 }
 
 export type PublishedSongStatus = 'PUBLISHED' | 'UNLISTED' | 'MODERATION_HIDDEN';
+export type OwnershipStatus = 'ACTIVE' | 'ORPHANED';
 
 export type CommunitySongAuthor = {
   userId: string;
@@ -53,6 +54,9 @@ export type CommunitySongCard = {
   votes: CommunitySongVotes;
   publishedAt: string;
   updatedAt: string;
+  stringCount?: number | null;
+  version?: number | null;
+  ownershipStatus?: OwnershipStatus | null;
 };
 
 export type CommunitySongDetail = CommunitySongCard & {
@@ -70,7 +74,9 @@ export interface Song {
   tuning: string;
   updatedAt: string;
   stringNames: string[];
+  stringCount: number;
   rows: SongRow[];
+  importedPublishedSongId?: string | null;
 }
 
 export interface SetlistSong {

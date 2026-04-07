@@ -7,6 +7,7 @@ import {
   MockUpgradeRequestDto,
   parsePlaylistDto,
   parseCommunitySongCardListDto,
+  parseCommunitySongCardDto,
   parseCommunitySongDetailDto,
   parseCommunitySavedSongsDto,
   parseCommunitySongVotesDto,
@@ -15,13 +16,19 @@ import {
   parseSongMetadataDto,
   parseSongChartDto,
   parseSubscriptionCapabilityDefaultsDto,
+  parseSubscriptionDowngradeResponseDto,
   parseSubscriptionPricingDto,
   parseSubscriptionSnapshotDto,
+  parseSubscriptionUpgradeResponseDto,
   PlaylistDto,
   SaveCommunitySongRequestDto,
   SubscriptionCapabilityDefaultsDto,
+  SubscriptionDowngradeRequestDto,
+  SubscriptionDowngradeResponseDto,
   SubscriptionPricingDto,
   SubscriptionSnapshotDto,
+  SubscriptionUpgradeRequestDto,
+  SubscriptionUpgradeResponseDto,
   ReplacePlaylistOrderRequestDto,
   ReplaceSongChartRequestDto,
   SongChartDto,
@@ -46,6 +53,8 @@ export interface BassTabApi {
   getSubscription(): Promise<SubscriptionSnapshotDto>;
   getSubscriptionPricing(): Promise<SubscriptionPricingDto>;
   getSubscriptionCapabilityDefaults(): Promise<SubscriptionCapabilityDefaultsDto>;
+  upgrade(payload: SubscriptionUpgradeRequestDto): Promise<SubscriptionUpgradeResponseDto>;
+  downgrade(payload: SubscriptionDowngradeRequestDto): Promise<SubscriptionDowngradeResponseDto>;
   mockUpgrade(payload: MockUpgradeRequestDto): Promise<SubscriptionSnapshotDto>;
   mockDowngrade(): Promise<SubscriptionSnapshotDto>;
   listSavedCommunitySongs(): Promise<CommunitySavedSongDto[]>;
@@ -54,6 +63,8 @@ export interface BassTabApi {
   voteCommunitySongUp(songId: string): Promise<CommunitySongVotesDto>;
   voteCommunitySongDown(songId: string): Promise<CommunitySongVotesDto>;
   clearCommunitySongVote(songId: string): Promise<CommunitySongVotesDto>;
+  adoptCommunitySong(publishedSongId: string): Promise<CommunitySongCardDto>;
+  disownCommunitySong(publishedSongId: string): Promise<void>;
 }
 
 export interface BassTabApiClientOptions {
@@ -92,6 +103,7 @@ interface ApiErrorPayload {
 const jsonHeaders = {
   Accept: 'application/json',
   'Content-Type': 'application/json',
+  'ngrok-skip-browser-warning': 'true',
 };
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
@@ -236,27 +248,27 @@ export class HttpBassTabApi implements BassTabApi {
     );
   }
 
-  async mockUpgrade(payload: MockUpgradeRequestDto): Promise<SubscriptionSnapshotDto> {
+  async upgrade(payload: SubscriptionUpgradeRequestDto): Promise<SubscriptionUpgradeResponseDto> {
     return this.request(
-      '/v1/subscription/mock-upgrade',
+      '/v1/subscription/upgrade',
       {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify(payload),
       },
-      parseSubscriptionSnapshotDto,
+      parseSubscriptionUpgradeResponseDto,
     );
   }
 
-  async mockDowngrade(): Promise<SubscriptionSnapshotDto> {
+  async downgrade(payload: SubscriptionDowngradeRequestDto): Promise<SubscriptionDowngradeResponseDto> {
     return this.request(
-      '/v1/subscription/mock-downgrade',
+      '/v1/subscription/downgrade',
       {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify({}),
+        body: JSON.stringify(payload),
       },
-      parseSubscriptionSnapshotDto,
+      parseSubscriptionDowngradeResponseDto,
     );
   }
 
@@ -325,6 +337,30 @@ export class HttpBassTabApi implements BassTabApi {
     );
   }
 
+  async adoptCommunitySong(publishedSongId: string): Promise<CommunitySongCardDto> {
+    return this.request(
+      `/v1/community/${encodeURIComponent(publishedSongId)}/adopt`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({}),
+      },
+      parseCommunitySongCardDto,
+    );
+  }
+
+  async disownCommunitySong(publishedSongId: string): Promise<void> {
+    await this.request(
+      `/v1/community/${encodeURIComponent(publishedSongId)}/disown`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({}),
+      },
+      () => undefined,
+    );
+  }
+
   private async request<T>(
     path: string,
     init: RequestInit,
@@ -349,6 +385,11 @@ export class HttpBassTabApi implements BassTabApi {
       response = await this.fetchImpl(url, {
         ...init,
         credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+          ...init.headers,
+        },
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -406,7 +447,9 @@ export class HttpBassTabApi implements BassTabApi {
       return { data: parse(undefined), status: response.status };
     }
 
-    return { data: parse(await response.json()), status: response.status };
+    const json = await response.json();
+    console.info('[BassTab API] response body', JSON.stringify(json));
+    return { data: parse(json), status: response.status };
   }
 }
 
@@ -438,10 +481,12 @@ export const createBassTabApiFromEnv = (): BassTabApi | null => {
   const baseUrl = process.env.EXPO_PUBLIC_BASSTAB_API_URL?.trim();
 
   if (baseUrl) {
+    console.info('[BassTabApi] env backend base URL detected', baseUrl);
     return createBassTabApi({ baseUrl });
   }
 
   if (isProductionRuntime) {
+    console.info('[BassTabApi] production runtime detected, using default API host', productionBaseUrl);
     return createBassTabApi({ baseUrl: productionBaseUrl });
   }
 

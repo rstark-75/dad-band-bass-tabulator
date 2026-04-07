@@ -11,8 +11,9 @@ import { TabPagePreview } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
 import { useSubscription, useUpgradePrompt } from '../features/subscription';
+import { useAuth } from '../features/auth';
 import { RootStackParamList } from '../navigation/types';
-import { useBassTab } from '../store/BassTabProvider';
+import { useBassTab, buildDefaultStringNames } from '../store/BassTabProvider';
 import { Song, SongChart } from '../types/models';
 import { formatUpdatedAt } from '../utils/date';
 import { flattenSongRowsToChart, mergeChartIntoSongRows } from '../utils/songChart';
@@ -48,6 +49,8 @@ const serializeSongDraft = (song: Song): string =>
     rows: song.rows,
   });
 
+const STRING_COUNT_OPTIONS = [4, 5];
+
 export function SongEditorScreen({ navigation, route }: Props) {
   const { songId, isNew = false } = route.params;
   const { tier, capabilities } = useSubscription();
@@ -55,6 +58,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
   const { songs, updateSong } = useBassTab();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
   const { lookup: publishedLookup } = usePublishedSongLookup(backendApi);
+  const { authState } = useAuth();
+  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
   const [mode, setMode] = useState<EditorMode>('edit');
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [hasSavedOnce, setHasSavedOnce] = useState(!isNew);
@@ -65,17 +70,39 @@ export function SongEditorScreen({ navigation, route }: Props) {
 
   const song = songs.find((item) => item.id === songId);
 
+  console.info('[SongEditor] render start', {
+    songId: song?.id,
+    hasDraft: Boolean(draftSong),
+    mode,
+    saveState,
+  });
+
   useEffect(() => {
     if (!song) {
       return;
     }
 
-    const nextDraft = cloneSong(song);
+    console.info('[SongEditor] opening song', {
+      songId: song.id,
+      title: song.title,
+      updatedAt: song.updatedAt,
+      rows: song.rows.length,
+      stringCount: song.stringCount,
+      isNew,
+    });
+
+    let nextDraft: Song;
+    try {
+      nextDraft = cloneSong(song);
+    } catch (error) {
+      console.error('[SongEditor] cloneSong failed', { error, song });
+      throw error;
+    }
     setDraftSong(nextDraft);
     baselineRef.current = serializeSongDraft(nextDraft);
     setSaveState('idle');
     setHasSavedOnce(!isNew);
-  }, [isNew, song?.id]);
+  }, [isNew, song?.id, song?.updatedAt]);
 
   useEffect(() => () => {
     if (saveResetTimerRef.current) {
@@ -88,14 +115,67 @@ export function SongEditorScreen({ navigation, route }: Props) {
   const isDirty = editorSong
     ? serializeSongDraft(editorSong) !== baselineRef.current
     : false;
-  const chart = useMemo(
-    () => (editorSong ? flattenSongRowsToChart(editorSong) : null),
-    [editorSong],
-  );
-  const parsedChart = useMemo(
-    () => (chart ? parseTab(chart.tab) : null),
-    [chart],
-  );
+  const chart = useMemo(() => {
+    if (!editorSong) {
+      return null;
+    }
+
+    console.info('[SongEditor] flattenSongRowsToChart start', {
+      songId: editorSong.id,
+      rows: editorSong.rows.length,
+    });
+
+    try {
+      return flattenSongRowsToChart(editorSong);
+    } catch (error) {
+      console.error('[SongEditor] flattenSongRowsToChart failed', { error, song: editorSong });
+      throw error;
+    }
+  }, [editorSong]);
+
+  console.info('[SongEditor] after chart memo', { songId: editorSong?.id });
+
+  const parsedChart = useMemo(() => {
+    if (!chart) {
+      return null;
+    }
+
+    console.info('[SongEditor] parseTab start', { tabLength: chart.tab.length });
+
+    try {
+      return parseTab(chart.tab);
+    } catch (error) {
+      console.error('[SongEditor] parseTab(chart.tab) failed', { error, chart });
+      throw error;
+    }
+  }, [chart]);
+
+  console.info('[SongEditor] after parsed chart memo', {
+    songId: editorSong?.id,
+    parsedChart: parsedChart ? parsedChart.stringNames.length : null,
+  });
+
+  const publishedInfo = song ? publishedLookup[song.id] : undefined;
+  const lockMetadata =
+    Boolean(publishedInfo) &&
+    publishedInfo?.ownershipStatus !== 'ORPHANED' &&
+    (currentUserId == null || publishedInfo?.ownerUserId === currentUserId);
+  const stringCountLimit = capabilities.maxStringCount;
+  const stringCountOptions = useMemo(() => {
+    const options = [...STRING_COUNT_OPTIONS];
+    const current = editorSong?.stringCount;
+
+    if (current && !options.includes(current)) {
+      options.push(current);
+    }
+
+    return Array.from(new Set(options)).sort((a, b) => a - b);
+  }, [editorSong?.stringCount]);
+  const stringCountFooter =
+    typeof stringCountLimit === 'number' &&
+    (editorSong?.stringCount ?? 0) > stringCountLimit
+      ? 'This chart uses more strings than your plan allows. Upgrade to edit.'
+      : undefined;
 
   if (!song || !editorSong || !chart || !parsedChart) {
     return (
@@ -109,6 +189,36 @@ export function SongEditorScreen({ navigation, route }: Props) {
   }
 
   const handleFieldChange = <K extends keyof Song>(field: K, value: Song[K]) => {
+    if (field === 'stringCount') {
+      const nextCount = Number(value as number);
+
+      if (!Number.isFinite(nextCount) || nextCount < 1 || nextCount === editorSong.stringCount) {
+        return;
+      }
+
+      if (
+        typeof capabilities.maxStringCount === 'number' &&
+        nextCount > capabilities.maxStringCount
+      ) {
+        showUpgradePrompt('STRING_LIMIT');
+        return;
+      }
+
+      setDraftSong((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          stringCount: nextCount,
+          stringNames: buildDefaultStringNames(nextCount),
+        };
+      });
+      setSaveState('idle');
+      return;
+    }
+
     setDraftSong((current) => {
       if (!current) {
         return current;
@@ -140,6 +250,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
       return {
         ...current,
         stringNames: parsed.stringNames.length > 0 ? parsed.stringNames : nextSongShape.stringNames,
+        stringCount:
+          (parsed.stringNames.length > 0 ? parsed.stringNames : nextSongShape.stringNames).length,
         rows: nextSongShape.rows,
       };
     });
@@ -154,6 +266,12 @@ export function SongEditorScreen({ navigation, route }: Props) {
     if (!isDirty && hasSavedOnce) {
       return;
     }
+
+    console.info('[SongEditor] handleSave', {
+      songId: editorSong.id,
+      isDirty,
+      hasSavedOnce,
+    });
 
     setSaveSignal((current) => current + 1);
     setSaveState('saving');
@@ -195,8 +313,6 @@ export function SongEditorScreen({ navigation, route }: Props) {
   };
 
   const saveButtonLabel = !hasSavedOnce ? 'Create Song' : 'Save Changes';
-
-  const lockMetadata = Boolean(publishedLookup[song.id]);
 
   const saveStateText =
     saveState === 'saving'
@@ -260,11 +376,17 @@ export function SongEditorScreen({ navigation, route }: Props) {
       >
         {mode === 'edit' ? (
           <>
-            <SongMetaFields song={editorSong} onFieldChange={handleFieldChange} compact lockMetadata={lockMetadata} />
+              <SongMetaFields
+                song={editorSong}
+                onFieldChange={handleFieldChange}
+                compact
+                lockMetadata={lockMetadata}
+                stringCountOptions={stringCountOptions}
+                stringCountFooter={stringCountFooter}
+              />
             {lockMetadata ? (
               <Text style={styles.lockedMetaText}>
-                Title, artist, key, and tuning are locked while this song is live in community. Release
-                a new version to bump the metadata.
+                Title, artist, key, and tuning are locked while you own this song in the community. Republish after editing to push changes, or release it to edit freely.
               </Text>
             ) : null}
 

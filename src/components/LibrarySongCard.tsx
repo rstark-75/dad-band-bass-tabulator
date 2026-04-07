@@ -11,10 +11,14 @@ interface LibrarySongCardProps {
   onLive: () => void;
   onDelete: () => void;
   isPublishedToCommunity?: boolean;
+  isOrphanedInCommunity?: boolean;
   onToggleCommunityRelease?: () => void;
   onLockedCommunityAction?: () => void;
   isCommunityReleaseUpdating?: boolean;
   isCommunityActionLocked?: boolean;
+  onRepublish?: () => void;
+  showRepublish?: boolean;
+  isRepublishDisabled?: boolean;
 }
 
 export function LibrarySongCard({
@@ -23,10 +27,14 @@ export function LibrarySongCard({
   onLive,
   onDelete,
   isPublishedToCommunity = false,
+  isOrphanedInCommunity = false,
   onToggleCommunityRelease,
   onLockedCommunityAction,
   isCommunityReleaseUpdating = false,
   isCommunityActionLocked = false,
+  onRepublish,
+  showRepublish = false,
+  isRepublishDisabled = false,
 }: LibrarySongCardProps) {
   const handleCommunityActionPress = () => {
     if (isCommunityActionLocked) {
@@ -55,7 +63,11 @@ export function LibrarySongCard({
           <Text style={styles.metaText} numberOfLines={1} ellipsizeMode="tail">
             {`${song.tuning} • Updated ${formatUpdatedAt(song.updatedAt)}`}
           </Text>
-          {isPublishedToCommunity ? (
+          {isOrphanedInCommunity ? (
+            <View style={[styles.communityBadge, styles.orphanedBadge]}>
+              <Text style={[styles.communityBadgeText, styles.orphanedBadgeText]}>Orphaned</Text>
+            </View>
+          ) : isPublishedToCommunity ? (
             <View style={styles.communityBadge}>
               <Text style={styles.communityBadgeText}>In Community</Text>
             </View>
@@ -67,13 +79,21 @@ export function LibrarySongCard({
         <View style={styles.actions}>
           <PrimaryButton label="Edit" onPress={onEdit} variant="ghost" />
           <PrimaryButton label="Perform" onPress={onLive} variant="secondary" />
+          {onRepublish && showRepublish ? (
+            <PrimaryButton
+              label="Republish"
+              onPress={onRepublish}
+              variant="secondary"
+              disabled={isRepublishDisabled}
+            />
+          ) : null}
           {onToggleCommunityRelease ? (
             <PrimaryButton
               label={
                 isCommunityReleaseUpdating
                   ? (isPublishedToCommunity ? 'Updating...' : 'Adding...')
                   : isPublishedToCommunity
-                    ? 'Unlist from Community'
+                    ? 'Release Song'
                     : 'Add to Community'
               }
               onPress={handleCommunityActionPress}
@@ -149,6 +169,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
     color: '#166534',
+  },
+  orphanedBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+  },
+  orphanedBadgeText: {
+    color: '#b45309',
   },
   lockedAction: {
     opacity: 0.55,

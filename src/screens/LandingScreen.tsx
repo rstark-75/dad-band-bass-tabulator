@@ -23,12 +23,15 @@ export function LandingScreen({ navigation }: Props) {
         benefits: [
           'Unlimited songs and setlists',
           'SVG Performance Mode',
+          '5 & 6-string support',
           'PDF export for offline gigs',
           'Unlimited community saves',
         ],
         ctaLabel: isPro ? 'Open Account' : `Go Pro - ${priceLabel}/month`,
         onCta: () => navigation.navigate(isPro ? 'Account' : 'Upgrade'),
-        note: isPro ? 'Your plan is active.' : 'No Internet at GIG - export your tabs to your device.',
+        note: isPro
+          ? 'Your plan is active.'
+          : 'No Internet at GIG - export your tabs to your device. Pro also unlocks 5 & 6-string charts.',
       }}
     />
   );
