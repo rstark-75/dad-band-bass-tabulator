@@ -1,19 +1,10 @@
 import type { UserDto } from '../api/authContracts.ts';
 
-export type AuthIntent = 'LOGIN' | 'REGISTER';
+export type AuthView = 'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD';
 
 export type AuthState =
   | { type: 'RESTORING_SESSION' }
   | { type: 'UNAUTHENTICATED' }
-  | {
-    type: 'CHECK_EMAIL';
-    userId: string;
-    email: string;
-    maskedEmail: string;
-    mode: AuthIntent;
-    avatarUrl?: string;
-    nextAllowedResendAt?: string | null;
-  }
   | {
     type: 'AUTHENTICATED';
     user: UserDto;
@@ -21,28 +12,33 @@ export type AuthState =
 
 export type AuthLoadingAction =
   | 'restoreSession'
-  | 'startAuth'
-  | 'resendAuth'
-  | 'verifyLink'
-  | 'verifyCode'
+  | 'login'
+  | 'register'
+  | 'forgotPassword'
+  | 'verifyEmail'
+  | 'resetPassword'
   | 'logout';
 
 export interface AuthStoreState {
   authState: AuthState;
   loadingAction: AuthLoadingAction | null;
   errorMessage: string | null;
-  draftUserId: string;
+  infoMessage: string | null;
+  authView: AuthView;
   draftEmail: string;
+  draftPassword: string;
+  draftHandle: string;
   draftAvatarUrl: string;
-  draftIntent: AuthIntent;
 }
 
 export const initialAuthStoreState: AuthStoreState = {
   authState: { type: 'RESTORING_SESSION' },
   loadingAction: null,
   errorMessage: null,
-  draftUserId: '',
+  infoMessage: null,
+  authView: 'LOGIN',
   draftEmail: '',
+  draftPassword: '',
+  draftHandle: '',
   draftAvatarUrl: '',
-  draftIntent: 'LOGIN',
 };

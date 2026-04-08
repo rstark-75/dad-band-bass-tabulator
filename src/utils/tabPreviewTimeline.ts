@@ -1,5 +1,5 @@
 import type { ParsedBar } from './tabLayout.ts';
-import { SLOTS_PER_BAR, EMPTY_SLOT } from './tabLayout.ts';
+import { EMPTY_SLOT, getBarSlotCount } from './tabLayout.ts';
 
 export type NoteRenderStyle = 'short' | 'beat' | 'hold2' | 'hold4';
 
@@ -27,7 +27,7 @@ const mapEmptyCountToStyle = (emptyCount: number): NoteRenderStyle => {
     return 'beat';
   }
 
-  // 8 slots = 4 beats in this grid. Empty count is duration-1.
+  // Empty count is duration-1 across the current row's slot grid.
   // Use circle+stem for anything longer than a beat and shorter than a whole note,
   // and reserve circle-only for whole note and longer sustains.
   if (emptyCount >= 7) {
@@ -37,20 +37,44 @@ const mapEmptyCountToStyle = (emptyCount: number): NoteRenderStyle => {
   return 'hold2';
 };
 
+const getBarAndSlotAtAbsolute = (
+  rowBars: ParsedBar[],
+  absoluteSlotIndex: number,
+): { barIndex: number; slotIndex: number } | null => {
+  let cursor = 0;
+
+  for (let index = 0; index < rowBars.length; index += 1) {
+    const slotCount = getBarSlotCount(rowBars[index]);
+    if (absoluteSlotIndex < cursor + slotCount) {
+      return {
+        barIndex: index,
+        slotIndex: absoluteSlotIndex - cursor,
+      };
+    }
+    cursor += slotCount;
+  }
+
+  return null;
+};
+
 const hasNoteAtSlotOnString = (
   rowBars: ParsedBar[],
   stringName: string,
   absoluteSlotIndex: number,
 ): boolean => {
-  const barIndex = Math.floor(absoluteSlotIndex / SLOTS_PER_BAR);
-  const slotIndex = absoluteSlotIndex % SLOTS_PER_BAR;
-  const bar = rowBars[barIndex];
+  const location = getBarAndSlotAtAbsolute(rowBars, absoluteSlotIndex);
+
+  if (!location) {
+    return false;
+  }
+
+  const bar = rowBars[location.barIndex];
 
   if (!bar) {
     return false;
   }
 
-  const value = bar.cells[stringName]?.[slotIndex];
+  const value = bar.cells[stringName]?.[location.slotIndex];
 
   if (typeof value !== 'string') {
     return false;
@@ -59,17 +83,39 @@ const hasNoteAtSlotOnString = (
   return isNumericTabValue(value);
 };
 
-const computeEmptySlotsOnString = (
+const hasAnyNoteAtAbsoluteSlot = (
   rowBars: ParsedBar[],
-  stringName: string,
   absoluteSlotIndex: number,
+): boolean => {
+  const location = getBarAndSlotAtAbsolute(rowBars, absoluteSlotIndex);
+
+  if (!location) {
+    return false;
+  }
+
+  const bar = rowBars[location.barIndex];
+
+  return Object.values(bar.cells).some((slots) => {
+    const value = slots?.[location.slotIndex];
+    return typeof value === 'string' && isNumericTabValue(value);
+  });
+};
+
+const computeEmptySlotsUntilNextOnset = (
+  rowBars: ParsedBar[],
+  absoluteSlotIndex: number,
+  stopAtAbsoluteSlotExclusive?: number,
 ): number => {
-  const totalSlots = rowBars.length * SLOTS_PER_BAR;
+  const totalSlots = rowBars.reduce((sum, bar) => sum + getBarSlotCount(bar), 0);
+  const maxSlotExclusive =
+    typeof stopAtAbsoluteSlotExclusive === 'number'
+      ? Math.min(totalSlots, stopAtAbsoluteSlotExclusive)
+      : totalSlots;
   let lookahead = absoluteSlotIndex + 1;
   let emptyCount = 0;
 
-  while (lookahead < totalSlots) {
-    if (hasNoteAtSlotOnString(rowBars, stringName, lookahead)) {
+  while (lookahead < maxSlotExclusive) {
+    if (hasAnyNoteAtAbsoluteSlot(rowBars, lookahead)) {
       break;
     }
 
@@ -91,13 +137,21 @@ export const getNoteRenderStyle = ({
   barIndex: number;
   slotIndex: number;
 }): NoteRenderStyle => {
-  const absoluteSlotIndex = barIndex * SLOTS_PER_BAR + slotIndex;
+  const absoluteBarStartSlot = rowBars
+    .slice(0, barIndex)
+    .reduce((sum, bar) => sum + getBarSlotCount(bar), 0);
+  const absoluteSlotIndex = absoluteBarStartSlot + slotIndex;
+  const absoluteBarEndSlotExclusive = absoluteBarStartSlot + getBarSlotCount(rowBars[barIndex]);
 
   if (!hasNoteAtSlotOnString(rowBars, stringName, absoluteSlotIndex)) {
     return 'short';
   }
 
-  const emptyCount = computeEmptySlotsOnString(rowBars, stringName, absoluteSlotIndex);
+  const emptyCount = computeEmptySlotsUntilNextOnset(
+    rowBars,
+    absoluteSlotIndex,
+    absoluteBarEndSlotExclusive,
+  );
 
   return mapEmptyCountToStyle(emptyCount);
 };

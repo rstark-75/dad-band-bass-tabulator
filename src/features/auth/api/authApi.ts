@@ -1,14 +1,24 @@
 import type {
   AuthenticatedResponse,
+  ForgotPasswordRequest,
+  LoginRequest,
   LogoutResponse,
+  RegisterRequest,
+  RegisterResponse,
+  ResetPasswordRequest,
   SessionResponse,
-  StartAuthRequest,
-  StartAuthResponse,
   UserDto,
-  VerifyCodeRequest,
+  VerifyEmailRequest,
 } from './authContracts.ts';
 
-type AuthAction = 'session' | 'start' | 'verifyLink' | 'verifyCode' | 'logout';
+type AuthAction =
+  | 'session'
+  | 'register'
+  | 'verifyEmail'
+  | 'login'
+  | 'forgotPassword'
+  | 'resetPassword'
+  | 'logout';
 
 interface AuthApiOptions {
   baseUrl: string;
@@ -63,19 +73,12 @@ const parseUserDto = (value: unknown): UserDto => {
     throw new Error('Invalid user payload.');
   }
 
-  const id = asString(record.id);
-  const email = asString(record.email);
   const userId =
-    asString(record.userId) ??
-    asString(record.username) ??
-    asString(record.handle) ??
-    asString(record.slug) ??
-    asString(record.id);
+    asString(record.userId) ?? asString(record.handle) ?? asString(record.username) ?? asString(record.id);
+  const id = asString(record.id) ?? userId;
+  const email = asString(record.email);
   const displayName =
-    asString(record.displayName) ??
-    userId ??
-    asString(record.name) ??
-    (email ? email.split('@')[0] : null);
+    asString(record.displayName) ?? asString(record.handle) ?? userId ?? (email ? email.split('@')[0] : null);
   const avatarUrl = asNullableString(record.avatarUrl);
   const subscriptionTierRaw = asString(record.subscriptionTier);
   const subscriptionTier =
@@ -133,46 +136,54 @@ export class AuthApi {
     };
   }
 
-  async startAuth(payload: StartAuthRequest): Promise<StartAuthResponse> {
-    const responsePayload = await this.requestJson('start', '/v1/auth/start', {
+  async register(payload: RegisterRequest): Promise<RegisterResponse> {
+    const responsePayload = await this.requestJson('register', '/v1/auth/register', {
       method: 'POST',
       body: payload,
     });
-    logAuthPayloadShape('start', responsePayload);
+    logAuthPayloadShape('register', responsePayload);
     const record = asRecord(responsePayload);
 
-    if (!record || record.status !== 'EMAIL_SENT') {
-      throw new AuthApiError('Invalid start auth payload.', undefined, 'start');
+    if (!record || record.status !== 'VERIFICATION_EMAIL_SENT') {
+      throw new AuthApiError('Invalid registration payload.', undefined, 'register');
     }
 
     return {
-      status: 'EMAIL_SENT',
-      maskedEmail: asString(record.maskedEmail) ?? payload.email ?? 'your linked email',
-      email:
-        asString(record.email) ??
-        asString(record.linkedEmail) ??
-        asString(record.resolvedEmail) ??
-        undefined,
-      nextAllowedResendAt: asString(record.nextAllowedResendAt),
+      status: 'VERIFICATION_EMAIL_SENT',
+      maskedEmail: asString(record.maskedEmail) ?? payload.email,
     };
   }
 
-  async verifyLink(token: string): Promise<AuthenticatedResponse> {
-    const payload = await this.requestJson('verifyLink', '/v1/auth/verify-link', {
-      method: 'POST',
-      body: { token },
-    });
-    logAuthPayloadShape('verifyLink', payload);
-    return this.parseAuthenticated(payload, 'verifyLink');
-  }
-
-  async verifyCode(payload: VerifyCodeRequest): Promise<AuthenticatedResponse> {
-    const responsePayload = await this.requestJson('verifyCode', '/v1/auth/verify-code', {
+  async verifyEmail(payload: VerifyEmailRequest): Promise<AuthenticatedResponse> {
+    const responsePayload = await this.requestJson('verifyEmail', '/v1/auth/verify-email', {
       method: 'POST',
       body: payload,
     });
-    logAuthPayloadShape('verifyCode', responsePayload);
-    return this.parseAuthenticated(responsePayload, 'verifyCode');
+    logAuthPayloadShape('verifyEmail', responsePayload);
+    return this.parseAuthenticated(responsePayload, 'verifyEmail');
+  }
+
+  async login(payload: LoginRequest): Promise<AuthenticatedResponse> {
+    const responsePayload = await this.requestJson('login', '/v1/auth/login', {
+      method: 'POST',
+      body: payload,
+    });
+    logAuthPayloadShape('login', responsePayload);
+    return this.parseAuthenticated(responsePayload, 'login');
+  }
+
+  async forgotPassword(payload: ForgotPasswordRequest): Promise<void> {
+    await this.requestJson('forgotPassword', '/v1/auth/forgot-password', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async resetPassword(payload: ResetPasswordRequest): Promise<void> {
+    await this.requestJson('resetPassword', '/v1/auth/reset-password', {
+      method: 'POST',
+      body: payload,
+    });
   }
 
   async logout(): Promise<LogoutResponse> {
@@ -191,10 +202,7 @@ export class AuthApi {
 
   private parseAuthenticated(payload: unknown, action: AuthAction): AuthenticatedResponse {
     const record = asRecord(payload);
-
-    const isAuthenticated =
-      record &&
-      (record.status === 'AUTHENTICATED' || record.authenticated === true);
+    const isAuthenticated = record && (record.status === 'AUTHENTICATED' || record.authenticated === true);
 
     if (!record || !isAuthenticated) {
       throw new AuthApiError('Invalid authentication payload.', undefined, action);
@@ -243,13 +251,13 @@ export class AuthApi {
       try {
         const json = await response.json();
         const record = asRecord(json);
-        const backendMessage =
-          (record && (asString(record.message) ?? asString(record.error))) || null;
-        code = record ? asString(record.code) ?? undefined : undefined;
-
-        if (backendMessage) {
-          message = backendMessage;
-        }
+        const errorRecord = asRecord(record?.error);
+        code = asString(errorRecord?.code) ?? asString(record?.code) ?? undefined;
+        message =
+          asString(errorRecord?.message) ??
+          asString(record?.message) ??
+          asString(record?.error) ??
+          message;
       } catch (_error) {
         // Ignore parsing failures and keep default message.
       }
@@ -257,8 +265,18 @@ export class AuthApi {
       throw new AuthApiError(message, response.status, action, code);
     }
 
+    if (response.status === 202 || response.status === 204) {
+      return null;
+    }
+
+    const text = await response.text();
+
+    if (!text.trim()) {
+      return null;
+    }
+
     try {
-      return await response.json();
+      return JSON.parse(text) as unknown;
     } catch (_error) {
       throw new AuthApiError('Response payload was not valid JSON.', response.status, action);
     }

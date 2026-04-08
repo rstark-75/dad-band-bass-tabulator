@@ -49,6 +49,7 @@ export function LiveViewScreen({ route }: Props) {
         tone="dark"
         compact={useCompactPreview}
         renderMode={renderMode}
+        svgScaleProfile="performance"
       />
     );
   }, [chart, renderMode, useCompactPreview]);

@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { EmptyState } from '../components/EmptyState';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionEditorCard } from '../components/SectionEditorCard';
-import { SongMetaFields } from '../components/SongMetaFields';
 import { TabPagePreview } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
-import { brandDisplayFontFamily } from '../constants/typography';
+import { tuningOptions } from '../constants/tunings';
 import { useSubscription, useUpgradePrompt } from '../features/subscription';
 import { useAuth } from '../features/auth';
 import { RootStackParamList } from '../navigation/types';
@@ -17,7 +16,13 @@ import { useBassTab, buildDefaultStringNames } from '../store/BassTabProvider';
 import { Song, SongChart } from '../types/models';
 import { formatUpdatedAt } from '../utils/date';
 import { flattenSongRowsToChart, mergeChartIntoSongRows } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
+import {
+  DEFAULT_BEAT_COUNT,
+  MAX_BEAT_COUNT,
+  MIN_BEAT_COUNT,
+  normalizeBeatCount,
+  parseTab,
+} from '../utils/tabLayout';
 import { createBassTabApiFromEnv } from '../api';
 import { usePublishedSongLookup } from '../hooks/usePublishedSongLookup';
 
@@ -31,10 +36,13 @@ const cloneSong = (song: Song): Song => ({
   rows: song.rows.map((row) => ({
     ...row,
     bars: row.bars.map((bar) => ({
+      ...(bar.beatCount !== undefined ? { beatCount: bar.beatCount } : {}),
+      ...(bar.note !== undefined ? { note: bar.note } : {}),
       cells: Object.fromEntries(
         Object.entries(bar.cells).map(([stringName, slots]) => [stringName, [...slots]]),
       ),
     })),
+    ...(row.defaultBeatCount !== undefined ? { defaultBeatCount: row.defaultBeatCount } : {}),
   })),
 });
 
@@ -70,7 +78,7 @@ export function SongEditorScreen({ navigation, route }: Props) {
 
   const song = songs.find((item) => item.id === songId);
 
-  console.info('[SongEditor] render start', {
+  console.info('[SongEditor] render start [PILL_BUILD_V2]', {
     songId: song?.id,
     hasDraft: Boolean(draftSong),
     mode,
@@ -159,8 +167,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
   const lockMetadata =
     Boolean(publishedInfo) &&
     publishedInfo?.ownershipStatus !== 'ORPHANED' &&
-    (currentUserId == null || publishedInfo?.ownerUserId === currentUserId);
-  const stringCountLimit = capabilities.maxStringCount;
+    currentUserId != null &&
+    publishedInfo?.ownerUserId === currentUserId;
   const stringCountOptions = useMemo(() => {
     const options = [...STRING_COUNT_OPTIONS];
     const current = editorSong?.stringCount;
@@ -171,11 +179,17 @@ export function SongEditorScreen({ navigation, route }: Props) {
 
     return Array.from(new Set(options)).sort((a, b) => a - b);
   }, [editorSong?.stringCount]);
-  const stringCountFooter =
-    typeof stringCountLimit === 'number' &&
-    (editorSong?.stringCount ?? 0) > stringCountLimit
-      ? 'This chart uses more strings than your plan allows. Upgrade to edit.'
-      : undefined;
+
+  const effectiveDefaultBeatCount = normalizeBeatCount(chart?.defaultBeatCount ?? DEFAULT_BEAT_COUNT);
+  const beatCountOptions = useMemo(
+    () => Array.from({ length: MAX_BEAT_COUNT - MIN_BEAT_COUNT + 1 }, (_, index) => MIN_BEAT_COUNT + index),
+    [],
+  );
+
+  console.log('[beatCount] SongEditor default beat selector render', {
+    effectiveDefaultBeatCount,
+    options: beatCountOptions,
+  });
 
   if (!song || !editorSong || !chart || !parsedChart) {
     return (
@@ -243,9 +257,14 @@ export function SongEditorScreen({ navigation, route }: Props) {
         tab: updates.tab ?? baseChart.tab,
         rowAnnotations: updates.rowAnnotations ?? baseChart.rowAnnotations ?? [],
         rowBarCounts: updates.rowBarCounts ?? baseChart.rowBarCounts ?? [],
+        defaultBeatCount: normalizeBeatCount(
+          updates.defaultBeatCount ?? baseChart.defaultBeatCount ?? DEFAULT_BEAT_COUNT,
+        ),
       };
       const parsed = parseTab(mergedChart.tab);
+      console.log('[beatCount] handleChartChange - parsed bar beatCounts:', parsed.bars.map(b => b.beatCount));
       const nextSongShape = mergeChartIntoSongRows(current, mergedChart);
+      console.log('[beatCount] handleChartChange - nextSongShape bar beatCounts:', nextSongShape.rows.flatMap(r => r.bars.map(b => b.beatCount)));
 
       return {
         ...current,
@@ -256,6 +275,16 @@ export function SongEditorScreen({ navigation, route }: Props) {
       };
     });
     setSaveState('idle');
+  };
+
+  const handleDefaultBeatCountSelect = (value: number) => {
+    const nextBeatCount = normalizeBeatCount(value);
+
+    if (nextBeatCount === effectiveDefaultBeatCount) {
+      return;
+    }
+
+    handleChartChange({ defaultBeatCount: nextBeatCount });
   };
 
   const handleSave = () => {
@@ -325,27 +354,21 @@ export function SongEditorScreen({ navigation, route }: Props) {
 
   return (
     <ScreenContainer scroll={false} contentStyle={styles.screen}>
-      <View style={styles.header}>
-        <View style={styles.headingBlock}>
-          <Text style={styles.title}>Song Builder</Text>
-          <Text style={styles.subtitle}>
-            Library to stage in one guided flow.
-          </Text>
-        </View>
-
-        <View style={styles.headerActions}>
+      <View style={styles.navBar}>
+        <View style={styles.navLeft}>
           <PrimaryButton
             label="Back to Library"
             onPress={() => navigation.navigate('MainTabs', { screen: 'Library' })}
             variant="ghost"
+            size="compact"
           />
           <PrimaryButton
-            label="Open Performance View"
+            label="Open Performance"
             onPress={handleOpenPerformance}
             variant="secondary"
+            size="compact"
           />
         </View>
-
         <View style={styles.modeSwitcher}>
           {(['edit', 'preview'] as EditorMode[]).map((value) => (
             <Pressable
@@ -369,6 +392,117 @@ export function SongEditorScreen({ navigation, route }: Props) {
         </View>
       </View>
 
+      <View style={styles.metaBarCard}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.metaBarScroll}
+          contentContainerStyle={styles.metaBar}
+        >
+          <View style={[styles.compactMetaField, styles.metaTitleField]}>
+            <Text style={styles.compactFieldLabel}>Title</Text>
+            <TextInput
+              value={editorSong.title}
+              onChangeText={(value) => handleFieldChange('title', value)}
+              style={styles.compactFieldInput}
+              placeholderTextColor={palette.textMuted}
+              editable={!lockMetadata}
+            />
+          </View>
+          <View style={[styles.compactMetaField, styles.metaArtistField]}>
+            <Text style={styles.compactFieldLabel}>Artist</Text>
+            <TextInput
+              value={editorSong.artist}
+              onChangeText={(value) => handleFieldChange('artist', value)}
+              style={styles.compactFieldInput}
+              placeholderTextColor={palette.textMuted}
+              editable={!lockMetadata}
+            />
+          </View>
+          <View style={styles.compactMetaField}>
+            <Text style={styles.compactFieldLabel}>Strings</Text>
+            <View style={[styles.stringCountSelector, lockMetadata && styles.selectorDisabled]}>
+              {stringCountOptions.map((option) => (
+                <Pressable
+                  key={`strings-${option}`}
+                  disabled={lockMetadata}
+                  onPress={() => handleFieldChange('stringCount', option)}
+                  style={[
+                    styles.stringCountPill,
+                    option === editorSong.stringCount && styles.stringCountPillActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.stringCountPillText,
+                      option === editorSong.stringCount && styles.stringCountPillTextActive,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.compactMetaField}>
+            <Text style={styles.compactFieldLabel}>Key</Text>
+            <TextInput
+              value={editorSong.key}
+              onChangeText={(value) => handleFieldChange('key', value)}
+              style={[styles.compactFieldInput, styles.shortFieldInput]}
+              placeholderTextColor={palette.textMuted}
+              editable={!lockMetadata}
+            />
+          </View>
+          <View style={styles.compactMetaField}>
+            <Text style={styles.compactFieldLabel}>Tuning</Text>
+            <TextInput
+              value={editorSong.tuning}
+              onChangeText={(value) => handleFieldChange('tuning', value)}
+              style={[styles.compactFieldInput, styles.tuningFieldInput]}
+              placeholderTextColor={palette.textMuted}
+              editable={!lockMetadata}
+            />
+            <View style={styles.tuningHintRow}>
+              {tuningOptions.slice(0, 3).map((tuning) => (
+                <Pressable
+                  key={tuning}
+                  disabled={lockMetadata}
+                  onPress={() => handleFieldChange('tuning', tuning)}
+                  style={styles.tuningQuickPick}
+                >
+                  <Text style={styles.tuningQuickPickText}>{tuning}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.compactMetaField}>
+            <Text style={styles.compactFieldLabel}>Default Beats (Pills)</Text>
+            <View style={styles.defaultBeatSelector}>
+              {beatCountOptions.map((option) => (
+                <Pressable
+                  key={`default-beat-${option}`}
+                  onPress={() => handleDefaultBeatCountSelect(option)}
+                  style={[
+                    styles.defaultBeatPill,
+                    option === effectiveDefaultBeatCount && styles.defaultBeatPillActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.defaultBeatPillText,
+                      option === effectiveDefaultBeatCount && styles.defaultBeatPillTextActive,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+
       <ScrollView
         style={styles.editorScroll}
         contentContainerStyle={styles.editorScrollContent}
@@ -376,14 +510,6 @@ export function SongEditorScreen({ navigation, route }: Props) {
       >
         {mode === 'edit' ? (
           <>
-              <SongMetaFields
-                song={editorSong}
-                onFieldChange={handleFieldChange}
-                compact
-                lockMetadata={lockMetadata}
-                stringCountOptions={stringCountOptions}
-                stringCountFooter={stringCountFooter}
-              />
             {lockMetadata ? (
               <Text style={styles.lockedMetaText}>
                 Title, artist, key, and tuning are locked while you own this song in the community. Republish after editing to push changes, or release it to edit freely.
@@ -425,6 +551,7 @@ export function SongEditorScreen({ navigation, route }: Props) {
                 rowAnnotations={chart.rowAnnotations}
                 rowBarCounts={chart.rowBarCounts}
                 renderMode={capabilities.svgEnabled ? 'svg' : 'ascii'}
+                svgScaleProfile="performance"
               />
             </View>
 
@@ -479,43 +606,159 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 12,
   },
-  header: {
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
   },
-  headingBlock: {
-    gap: 4,
+  navLeft: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
   },
-  title: {
-    fontSize: 30,
-    fontWeight: '800',
-    fontFamily: brandDisplayFontFamily,
-    letterSpacing: 0.2,
+  metaBarScroll: {
+    maxHeight: 78,
+  },
+  metaBarCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  metaBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingBottom: 2,
+  },
+  compactMetaField: {
+    minWidth: 86,
+  },
+  metaTitleField: {
+    minWidth: 210,
+  },
+  metaArtistField: {
+    minWidth: 170,
+  },
+  compactFieldLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    color: palette.textMuted,
+    marginBottom: 3,
+  },
+  compactFieldInput: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 14,
+    fontWeight: '600',
     color: palette.text,
   },
-  subtitle: {
-    fontSize: 15,
-    lineHeight: 20,
+  shortFieldInput: {
+    width: 66,
+    textAlign: 'center',
+  },
+  tuningFieldInput: {
+    minWidth: 112,
+  },
+  tuningHintRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 4,
+  },
+  tuningQuickPick: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: palette.border,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: '#f8fafc',
+  },
+  tuningQuickPickText: {
+    fontSize: 10,
+    fontWeight: '700',
     color: palette.textMuted,
   },
-  headerActions: {
+  stringCountSelector: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    gap: 4,
+  },
+  selectorDisabled: {
+    opacity: 0.5,
+  },
+  stringCountPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#f8fafc',
+    minWidth: 30,
+    minHeight: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  stringCountPillActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primaryMuted,
+  },
+  stringCountPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  stringCountPillTextActive: {
+    color: palette.primary,
+  },
+  defaultBeatSelector: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  defaultBeatPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: '#f8fafc',
+    minWidth: 24,
+    minHeight: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  defaultBeatPillActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primaryMuted,
+  },
+  defaultBeatPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  defaultBeatPillTextActive: {
+    color: palette.primary,
   },
   modeSwitcher: {
     flexDirection: 'row',
-    gap: 8,
-    padding: 4,
-    borderRadius: 14,
+    gap: 4,
+    padding: 3,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: palette.border,
     backgroundColor: palette.surface,
     alignSelf: 'flex-start',
   },
   modeOption: {
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     backgroundColor: 'transparent',
   },
   modeOptionActive: {

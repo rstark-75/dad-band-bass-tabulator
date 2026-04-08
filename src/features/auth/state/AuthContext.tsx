@@ -53,13 +53,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
 
       dispatch({
-        type: 'setDraftSignIn',
-        userId: current.user.userId,
+        type: 'setDraftCredentials',
         email: current.user.email,
+        password: '',
+        handle: current.user.userId,
         avatarUrl: current.user.avatarUrl ?? '',
       });
       dispatch({ type: 'setUnauthenticated' });
       dispatch({ type: 'setError', errorMessage: 'Session expired. Please sign in again.' });
+      dispatch({ type: 'setInfo', infoMessage: null });
       dispatch({ type: 'setLoading', loadingAction: null });
     });
 

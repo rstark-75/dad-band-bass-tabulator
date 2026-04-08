@@ -1,4 +1,8 @@
 const DEFAULT_STRING_NAMES = ['G', 'D', 'A', 'E'];
+export const MIN_BEAT_COUNT = 2;
+export const MAX_BEAT_COUNT = 6;
+export const DEFAULT_BEAT_COUNT = 4;
+export const SLOTS_PER_BEAT = 2;
 export const SLOTS_PER_BAR = 8;
 const CHARS_PER_SLOT = 2;
 export const EMPTY_SLOT = '-';
@@ -6,6 +10,7 @@ const BARS_PER_ROW = 4;
 
 export interface ParsedBar {
   cells: Record<string, string[]>;
+  beatCount?: number;
 }
 
 export interface ParsedTabLayout {
@@ -17,13 +22,72 @@ export interface TabRowAnnotation {
   label: string;
   beforeText: string;
   afterText: string;
+  barNotes: string[];
 }
 
-const createEmptyBar = (stringNames: string[]): ParsedBar => ({
+export const normalizeBeatCount = (value?: number): number =>
+  Math.max(
+    MIN_BEAT_COUNT,
+    Math.min(MAX_BEAT_COUNT, Math.floor(value ?? DEFAULT_BEAT_COUNT)),
+  );
+
+export const getSlotsPerBar = (beatCount?: number): number =>
+  normalizeBeatCount(beatCount) * SLOTS_PER_BEAT;
+
+export const getBarBeatCount = (bar?: Pick<ParsedBar, 'beatCount'>): number =>
+  normalizeBeatCount(bar?.beatCount);
+
+export const getBarSlotCount = (
+  bar: ParsedBar | undefined,
+  fallbackStringNames: string[] = [],
+): number => {
+  if (!bar) {
+    return getSlotsPerBar();
+  }
+
+  if (typeof bar.beatCount === 'number') {
+    return getSlotsPerBar(bar.beatCount);
+  }
+
+  const cellSlotCount = Object.entries(bar.cells).reduce((maxCount, [, slots]) => {
+    if (!Array.isArray(slots)) {
+      return maxCount;
+    }
+
+    return Math.max(maxCount, slots.length);
+  }, 0);
+
+  if (cellSlotCount > 0) {
+    return cellSlotCount;
+  }
+
+  if (fallbackStringNames.length > 0) {
+    const firstStringName = fallbackStringNames[0];
+    return (bar.cells[firstStringName] ?? []).length || getSlotsPerBar();
+  }
+
+  return getSlotsPerBar();
+};
+
+const normalizeSlots = (slots: string[] | undefined, targetSlots: number): string[] => {
+  const nextSlots = [...(slots ?? [])].slice(0, targetSlots);
+
+  while (nextSlots.length < targetSlots) {
+    nextSlots.push(EMPTY_SLOT);
+  }
+
+  return nextSlots.map(normalizeSlot);
+};
+
+const createEmptyBar = (
+  stringNames: string[],
+  beatCount = DEFAULT_BEAT_COUNT,
+): ParsedBar => ({
+  beatCount: normalizeBeatCount(beatCount),
   cells: Object.fromEntries(
     stringNames.map((stringName) => [
       stringName,
-      Array.from({ length: SLOTS_PER_BAR }, () => EMPTY_SLOT),
+      Array.from({ length: getSlotsPerBar(beatCount) }, () => EMPTY_SLOT),
     ]),
   ),
 });
@@ -38,21 +102,33 @@ const normalizeSlot = (value: string): string => {
   return trimmed.slice(0, CHARS_PER_SLOT);
 };
 
-const segmentToSlots = (segment: string): string[] => {
+const inferBeatCountFromSegment = (segment: string): number => {
   const sanitized = segment.replace(/\s/g, '');
 
   if (!sanitized) {
-    return Array.from({ length: SLOTS_PER_BAR }, () => EMPTY_SLOT);
+    return MIN_BEAT_COUNT;
   }
 
-  const chunkSize = sanitized.length <= SLOTS_PER_BAR ? 1 : CHARS_PER_SLOT;
+  const inferredSlotCount = Math.max(1, Math.round(sanitized.length / CHARS_PER_SLOT));
+  return normalizeBeatCount(Math.round(inferredSlotCount / SLOTS_PER_BEAT));
+};
+
+const segmentToSlots = (segment: string, beatCount: number): string[] => {
+  const targetSlots = getSlotsPerBar(beatCount);
+  const sanitized = segment.replace(/\s/g, '');
+
+  if (!sanitized) {
+    return Array.from({ length: targetSlots }, () => EMPTY_SLOT);
+  }
+
+  const chunkSize = sanitized.length <= targetSlots ? 1 : CHARS_PER_SLOT;
   const slots: string[] = [];
 
-  for (let index = 0; index < sanitized.length && slots.length < SLOTS_PER_BAR; index += chunkSize) {
+  for (let index = 0; index < sanitized.length && slots.length < targetSlots; index += chunkSize) {
     slots.push(normalizeSlot(sanitized.slice(index, index + chunkSize)));
   }
 
-  while (slots.length < SLOTS_PER_BAR) {
+  while (slots.length < targetSlots) {
     slots.push(EMPTY_SLOT);
   }
 
@@ -100,12 +176,19 @@ export const parseTab = (tab: string): ParsedTabLayout => {
     1,
     ...parsedLines.map((line) => line.segments.length),
   );
+  const barBeatCounts = Array.from({ length: barCount }, (_, barIndex) =>
+    parsedLines.reduce((maxBeatCount, line) => {
+      const segment = line.segments[barIndex] ?? '';
+      return Math.max(maxBeatCount, inferBeatCountFromSegment(segment));
+    }, MIN_BEAT_COUNT),
+  );
 
   const bars = Array.from({ length: barCount }, (_, barIndex) => {
-    const bar = createEmptyBar(stringNames);
+    const beatCount = barBeatCounts[barIndex];
+    const bar = createEmptyBar(stringNames, beatCount);
 
     parsedLines.forEach((line) => {
-      bar.cells[line.label] = segmentToSlots(line.segments[barIndex] ?? '');
+      bar.cells[line.label] = segmentToSlots(line.segments[barIndex] ?? '', beatCount);
     });
 
     return bar;
@@ -118,11 +201,12 @@ export const renderTab = (stringNames: string[], bars: ParsedBar[]): string =>
   stringNames
     .map((stringName) => {
       const renderedBars = bars
-        .map((bar) =>
-          (bar.cells[stringName] ?? Array.from({ length: SLOTS_PER_BAR }, () => EMPTY_SLOT))
+        .map((bar) => {
+          const targetSlots = getBarSlotCount(bar, stringNames);
+          return normalizeSlots(bar.cells[stringName], targetSlots)
             .map(slotToSegment)
-            .join(''),
-        )
+            .join('');
+        })
         .map((segment) => `|${segment}`)
         .join('');
 
@@ -130,10 +214,29 @@ export const renderTab = (stringNames: string[], bars: ParsedBar[]): string =>
     })
     .join('\n');
 
-const beatGuide = '  |1 & 2 & 3 & 4 &';
-
 const joinRenderedBars = (segments: string[]) =>
   segments.map((segment, index) => (index === 0 ? segment : segment.slice(1))).join('');
+
+const getBeatGuide = (beatCount: number): string => {
+  let guide = '|';
+
+  for (let beat = 1; beat <= beatCount; beat += 1) {
+    guide += `${beat} & `;
+  }
+
+  return guide;
+};
+
+const getBarTextWidth = (bar: ParsedBar): number =>
+  getBarSlotCount(bar) * CHARS_PER_SLOT;
+
+const buildBarNoteGuide = (rowBars: ParsedBar[], barNotes: string[] = []) =>
+  joinRenderedBars(
+    rowBars.map((bar, index) => {
+      const barTextWidth = getBarTextWidth(bar);
+      return `|${(barNotes[index] ?? '').trim().slice(0, barTextWidth).padEnd(barTextWidth, ' ')}`;
+    }),
+  );
 
 export const buildTabPagePreview = (
   stringNames: string[],
@@ -156,12 +259,19 @@ export const buildTabPagePreview = (
       rows.push(`[${annotation.beforeText.trim()}]`);
     }
 
-    rows.push(joinRenderedBars(rowBars.map(() => beatGuide)));
+    if (annotation?.barNotes?.some((note) => note.trim())) {
+      rows.push(buildBarNoteGuide(rowBars, annotation.barNotes.slice(0, rowBars.length)));
+    }
+
+    rows.push(`  ${joinRenderedBars(rowBars.map((bar) => getBeatGuide(getBarBeatCount(bar))))}`);
 
     stringNames.forEach((stringName) => {
       const renderedSegments = rowBars
         .map((bar) =>
-          `|${(bar.cells[stringName] ?? Array.from({ length: SLOTS_PER_BAR }, () => EMPTY_SLOT))
+          `|${normalizeSlots(
+            bar.cells[stringName],
+            getBarSlotCount(bar, stringNames),
+          )
             .map(slotToSegment)
             .join('')}|`,
         );
@@ -208,18 +318,22 @@ export const insertBar = (
   index: number,
   stringNames: string[],
   sourceBar?: ParsedBar,
+  beatCount = DEFAULT_BEAT_COUNT,
 ): ParsedBar[] => {
   const nextBar =
     sourceBar ??
-    createEmptyBar(stringNames);
+    createEmptyBar(stringNames, beatCount);
+  const normalizedBeatCount = getBarBeatCount(nextBar);
+  const targetSlots = getSlotsPerBar(normalizedBeatCount);
 
   return [
     ...bars.slice(0, index),
     {
+      beatCount: normalizedBeatCount,
       cells: Object.fromEntries(
         stringNames.map((stringName) => [
           stringName,
-          [...(nextBar.cells[stringName] ?? Array.from({ length: SLOTS_PER_BAR }, () => EMPTY_SLOT))],
+          normalizeSlots(nextBar.cells[stringName], targetSlots),
         ]),
       ),
     },

@@ -272,6 +272,30 @@ export class HttpBassTabApi implements BassTabApi {
     );
   }
 
+  async mockUpgrade(payload: MockUpgradeRequestDto): Promise<SubscriptionSnapshotDto> {
+    return this.request(
+      '/v1/subscription/mock/upgrade',
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(payload),
+      },
+      parseSubscriptionSnapshotDto,
+    );
+  }
+
+  async mockDowngrade(): Promise<SubscriptionSnapshotDto> {
+    return this.request(
+      '/v1/subscription/mock/downgrade',
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({}),
+      },
+      parseSubscriptionSnapshotDto,
+    );
+  }
+
   async listSavedCommunitySongs(): Promise<CommunitySavedSongDto[]> {
     return this.request('/v1/community/saved', { method: 'GET' }, parseCommunitySavedSongsDto);
   }
@@ -448,7 +472,9 @@ export class HttpBassTabApi implements BassTabApi {
     }
 
     const json = await response.json();
-    console.info('[BassTab API] response body', JSON.stringify(json));
+    if (__DEV__) {
+      console.info('[BassTab API] response body', JSON.stringify(json));
+    }
     return { data: parse(json), status: response.status };
   }
 }

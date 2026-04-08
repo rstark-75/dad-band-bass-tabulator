@@ -1,13 +1,18 @@
-import { CheckEmailScreen } from './CheckEmailScreen';
-import { SignInScreen } from './SignInScreen';
+import { ForgotPasswordScreen } from './ForgotPasswordScreen';
+import { LoginScreen } from './LoginScreen';
+import { RegisterScreen } from './RegisterScreen';
 import { useAuth } from '../state/useAuth';
 
 export function AuthEntryScreen() {
-  const { authState } = useAuth();
+  const { authView } = useAuth();
 
-  if (authState.type === 'CHECK_EMAIL') {
-    return <CheckEmailScreen />;
+  if (authView === 'REGISTER') {
+    return <RegisterScreen />;
   }
 
-  return <SignInScreen />;
+  if (authView === 'FORGOT_PASSWORD') {
+    return <ForgotPasswordScreen />;
+  }
+
+  return <LoginScreen />;
 }

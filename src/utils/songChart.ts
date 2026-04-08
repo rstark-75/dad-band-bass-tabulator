@@ -1,5 +1,5 @@
 import { createId } from './ids';
-import { parseTab, renderTab } from './tabLayout';
+import { DEFAULT_BEAT_COUNT, normalizeBeatCount, parseTab, renderTab } from './tabLayout';
 import { Song, SongChart, SongRow, TabRowAnnotation } from '../types/models';
 
 const defaultBarsPerRow = 4;
@@ -9,6 +9,7 @@ const cloneAnnotation = (annotation?: Partial<TabRowAnnotation>): TabRowAnnotati
   label: annotation?.label ?? '',
   beforeText: annotation?.beforeText ?? '',
   afterText: annotation?.afterText ?? '',
+  barNotes: [...(annotation?.barNotes ?? [])],
 });
 
 export const normalizeRowBarCounts = (
@@ -53,21 +54,24 @@ export const flattenSongRowsToChart = (song: Pick<Song, 'stringNames' | 'rows'>)
         label: row.label,
         beforeText: row.beforeText,
         afterText: row.afterText,
+        barNotes: row.bars.map((bar) => bar.note ?? ''),
       }),
     ),
     rowBarCounts: song.rows.map((row) => row.bars.length),
+    defaultBeatCount: normalizeBeatCount(song.rows[0]?.defaultBeatCount ?? DEFAULT_BEAT_COUNT),
   };
 };
 
 export const mergeChartIntoSongRows = (
   sourceSong: Pick<Song, 'stringNames' | 'rows'>,
-  editedChart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts'>,
+  editedChart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts' | 'defaultBeatCount'>,
 ): Pick<Song, 'stringNames' | 'rows'> => {
   const parsed = parseTab(editedChart.tab);
   const stringNames =
     parsed.stringNames.length > 0 ? parsed.stringNames : sourceSong.stringNames;
   const rowBarCounts = normalizeRowBarCounts(parsed.bars.length, editedChart.rowBarCounts);
   const rowAnnotations = editedChart.rowAnnotations ?? [];
+  const defaultBeatCount = normalizeBeatCount(editedChart.defaultBeatCount ?? DEFAULT_BEAT_COUNT);
 
   let barCursor = 0;
 
@@ -83,7 +87,12 @@ export const mergeChartIntoSongRows = (
       label: annotation.label.trim(),
       beforeText: annotation.beforeText,
       afterText: annotation.afterText,
-      bars: nextRowBars,
+      defaultBeatCount,
+      bars: nextRowBars.map((bar, barIndex) => ({
+        ...bar,
+        beatCount: normalizeBeatCount(bar.beatCount ?? defaultBeatCount),
+        note: annotation.barNotes[barIndex]?.trim() ? annotation.barNotes[barIndex].trim() : undefined,
+      })),
     };
   });
 

@@ -11,9 +11,10 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
-import { AuthCallbackScreen } from '../features/auth/components/AuthCallbackScreen';
 import { AuthEntryScreen } from '../features/auth/components/AuthEntryScreen';
 import { AuthRestoringScreen } from '../features/auth/components/AuthRestoringScreen';
+import { ResetPasswordScreen } from '../features/auth/components/ResetPasswordScreen';
+import { VerifyEmailScreen } from '../features/auth/components/VerifyEmailScreen';
 import { getAuthRouteMode } from '../features/auth/state/authReducer';
 import { useAuth } from '../features/auth/state/useAuth';
 import { AccountScreen } from '../screens/AccountScreen';
@@ -110,7 +111,8 @@ export const linking: LinkingOptions<RootStackParamList> = {
   config: {
     screens: {
       AuthEntry: 'auth',
-      AuthCallback: 'auth/callback',
+      VerifyEmail: 'auth/verify-email',
+      ResetPassword: 'auth/reset-password',
       MainTabs: {
         path: 'MainTabs',
         screens: {
@@ -287,8 +289,13 @@ export function AppNavigator() {
         ) : null}
 
         <Stack.Screen
-          name="AuthCallback"
-          component={AuthCallbackScreen}
+          name="VerifyEmail"
+          component={VerifyEmailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ResetPassword"
+          component={ResetPasswordScreen}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>

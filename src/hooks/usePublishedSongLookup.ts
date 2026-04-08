@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { BassTabApi, createBassTabApiFromEnv } from '../api';
+import { OwnershipStatus } from '../types/models';
 
 export type PublishedSongInfo = {
   publishedSongId: string;
@@ -10,7 +11,7 @@ export type PublishedSongInfo = {
   tuning?: string | null;
   publishedAt: string;
   updatedAt: string;
-  ownershipStatus?: 'ACTIVE' | 'ORPHANED' | null;
+  ownershipStatus?: OwnershipStatus | null;
   ownerUserId?: string | null;
 };
 

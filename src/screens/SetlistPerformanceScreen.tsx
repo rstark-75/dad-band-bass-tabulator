@@ -326,6 +326,7 @@ export function SetlistPerformanceScreen({ route }: Props) {
                 tone="dark"
                 compact={useCompactPreview}
                 renderMode={renderMode}
+                svgScaleProfile="performance"
               />
             </View>
           </ScrollView>

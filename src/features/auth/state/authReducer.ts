@@ -1,21 +1,14 @@
 import type { UserDto } from '../api/authContracts.ts';
-import type { AuthIntent, AuthLoadingAction, AuthStoreState } from './authTypes.ts';
+import type { AuthLoadingAction, AuthStoreState, AuthView } from './authTypes.ts';
 
 export type AuthEvent =
   | { type: 'setLoading'; loadingAction: AuthLoadingAction | null }
   | { type: 'setError'; errorMessage: string | null }
-  | { type: 'setDraftSignIn'; userId: string; email: string; avatarUrl?: string; intent?: AuthIntent }
+  | { type: 'setInfo'; infoMessage: string | null }
+  | { type: 'setAuthView'; authView: AuthView }
+  | { type: 'setDraftCredentials'; email?: string; password?: string; handle?: string; avatarUrl?: string }
   | { type: 'setRestoring' }
   | { type: 'setUnauthenticated' }
-  | {
-    type: 'setCheckEmail';
-    userId: string;
-    email: string;
-    maskedEmail: string;
-    mode: AuthIntent;
-    avatarUrl?: string;
-    nextAllowedResendAt?: string | null;
-  }
   | { type: 'setAuthenticated'; user: UserDto };
 
 export const authReducer = (
@@ -33,13 +26,23 @@ export const authReducer = (
         ...state,
         errorMessage: event.errorMessage,
       };
-    case 'setDraftSignIn':
+    case 'setInfo':
       return {
         ...state,
-        draftUserId: event.userId,
-        draftEmail: event.email,
-        draftAvatarUrl: event.avatarUrl ?? '',
-        draftIntent: event.intent ?? state.draftIntent,
+        infoMessage: event.infoMessage,
+      };
+    case 'setAuthView':
+      return {
+        ...state,
+        authView: event.authView,
+      };
+    case 'setDraftCredentials':
+      return {
+        ...state,
+        draftEmail: event.email ?? state.draftEmail,
+        draftPassword: event.password ?? state.draftPassword,
+        draftHandle: event.handle ?? state.draftHandle,
+        draftAvatarUrl: event.avatarUrl ?? state.draftAvatarUrl,
       };
     case 'setRestoring':
       return {
@@ -50,19 +53,6 @@ export const authReducer = (
       return {
         ...state,
         authState: { type: 'UNAUTHENTICATED' },
-      };
-    case 'setCheckEmail':
-      return {
-        ...state,
-        authState: {
-          type: 'CHECK_EMAIL',
-          userId: event.userId,
-          email: event.email,
-          maskedEmail: event.maskedEmail,
-          mode: event.mode,
-          avatarUrl: event.avatarUrl,
-          nextAllowedResendAt: event.nextAllowedResendAt,
-        },
       };
     case 'setAuthenticated':
       return {

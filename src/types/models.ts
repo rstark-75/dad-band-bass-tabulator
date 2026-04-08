@@ -2,10 +2,13 @@ export interface TabRowAnnotation {
   label: string;
   beforeText: string;
   afterText: string;
+  barNotes: string[];
 }
 
 export interface SongBar {
   cells: Record<string, string[]>;
+  note?: string;
+  beatCount?: number;
 }
 
 export interface SongRow {
@@ -13,6 +16,7 @@ export interface SongRow {
   label: string;
   beforeText: string;
   afterText: string;
+  defaultBeatCount?: number;
   bars: SongBar[];
 }
 
@@ -22,6 +26,7 @@ export interface SongChart {
   tab: string;
   rowAnnotations: TabRowAnnotation[];
   rowBarCounts: number[];
+  defaultBeatCount?: number;
 }
 
 export type PublishedSongStatus = 'PUBLISHED' | 'UNLISTED' | 'MODERATION_HIDDEN';

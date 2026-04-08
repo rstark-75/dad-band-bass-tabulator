@@ -193,7 +193,6 @@ export const mockSongListItem: SongListItemProps = {
   keySignature: 'E',
   tuning: 'Standard',
   contributorName: 'Mercy Vibes',
-  contributorEmoji: '🎸',
   contributionDate: 'Apr 5, 2026',
   voteScore: 8,
   userVote: 'UP',

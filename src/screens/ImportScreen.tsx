@@ -253,23 +253,23 @@ export function ImportScreen({ navigation }: Props) {
         }
       });
       setSavedCommunitySongIds(Array.from(savedIdSet));
-      console.info('Community saved songs snapshot', {
-        savedCount: savedSongs.length,
-        reportedSaved: savedSongs[0]?.communitySongsSaved ?? 0,
-      });
       setCommunityCatalog(sortedSongs);
       if (releasedSongs.length === 0) {
         setStatusMessage('No community charts have been released yet.');
       }
-      await refresh();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load community charts.';
       setStatusMessage(message);
       console.warn('Community song hydrate failed', error);
     } finally {
       setLoadingCatalog(false);
+      // Refresh subscription state independently — failure here must not
+      // corrupt the catalog error message or block the catalog from rendering.
+      refresh().catch((error) => {
+        console.warn('Subscription refresh failed during community hydrate', error);
+      });
     }
-  }, [backendApi]);
+  }, [backendApi, refresh]);
 
   useEffect(() => {
     void hydrateCommunity();
@@ -394,10 +394,6 @@ export function ImportScreen({ navigation }: Props) {
       if (!hasCommunitySave) {
         try {
           const communitySongId = resolveCommunitySaveId(songForSave);
-          console.log('saveCommunity payload', {
-            communitySongId,
-            song: songForSave,
-          });
           const savedResponse = await backendApi.saveCommunitySong({ communitySongId });
           console.info(
             'Saved community song response',
@@ -444,12 +440,10 @@ export function ImportScreen({ navigation }: Props) {
               return;
             }
 
+            // Intentional reassignment: the import step below uses songForSave,
+            // so it must point to the refreshed entry after a successful retry.
             songForSave = refreshedMatch;
             const retryCommunitySongId = resolveCommunitySaveId(songForSave);
-            console.log('saveCommunity payload', {
-              communitySongId: retryCommunitySongId,
-              song: songForSave,
-            });
             await backendApi.saveCommunitySong({ communitySongId: retryCommunitySongId });
           } else if (!isCommunityAlreadySavedError(error)) {
             throw error;
@@ -461,9 +455,14 @@ export function ImportScreen({ navigation }: Props) {
       const { song: importedSongDto, status: importStatus } =
         await backendApi.importCommunitySong(importTargetId);
 
-      const importedSong = importSongFromDto(importedSongDto, {
-        importedPublishedSongId: importedSongDto.importedPublishedSongId ?? importTargetId,
-      });
+      // Prefer the BE-supplied importedPublishedSongId, then the canonical
+      // publishedSongId for this entry, and never fall back to sourceSongId
+      // (which would break the "Already saved" lookup keyed on publishedSongId).
+      const importedPublishedSongId =
+        importedSongDto.importedPublishedSongId ??
+        songForSave.publishedSongId ??
+        importTargetId;
+      const importedSong = importSongFromDto(importedSongDto, { importedPublishedSongId });
 
       const nextSaveId = resolveCommunitySaveId(songForSave);
       setSavedCommunitySongIds((prevIds) => {
@@ -568,7 +567,7 @@ export function ImportScreen({ navigation }: Props) {
               ...song,
               ownershipStatus: updatedCard.ownershipStatus ?? 'ACTIVE',
               version: updatedCard.version ?? song.version,
-              author: updatedCard.author
+              author: updatedCard.author?.userId
                 ? {
                   userId: updatedCard.author.userId,
                   displayName: updatedCard.author.displayName ?? null,
@@ -671,7 +670,7 @@ export function ImportScreen({ navigation }: Props) {
         communityCatalog
           .filter((song) => {
             if (ownershipFilter === 'MINE') {
-              return song.ownershipStatus !== 'ORPHANED' &&
+              return song.ownershipStatus === 'ACTIVE' &&
                 Boolean(currentUserId) &&
                 song.author?.userId === currentUserId;
             }

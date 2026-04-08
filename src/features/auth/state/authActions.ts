@@ -1,16 +1,18 @@
 import { AuthApi, AuthApiError } from '../api/authApi.ts';
 import type { AuthEvent } from './authReducer.ts';
-import type { AuthIntent, AuthStoreState } from './authTypes.ts';
+import type { AuthStoreState, AuthView } from './authTypes.ts';
 import { toAuthErrorMessage } from '../utils/authErrorMessage.ts';
 import { isValidEmail, normalizeEmail } from '../utils/email.ts';
-import { sanitizeCode } from '../utils/codeInput.ts';
-import { isValidUserId, normalizeUserId } from '../utils/userId.ts';
 
 interface ActionDeps {
   api: AuthApi | null;
   dispatch: (event: AuthEvent) => void;
   getState: () => AuthStoreState;
 }
+
+const normalizeHandle = (value: string): string => value.trim().toLowerCase();
+const isValidHandle = (value: string): boolean => /^[a-z0-9_-]{3,30}$/.test(value);
+const isValidPassword = (value: string): boolean => value.length >= 8 && value.length <= 128;
 
 export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
   const requireApi = (): AuthApi => {
@@ -25,32 +27,22 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     dispatch({ type: 'setError', errorMessage });
   };
 
-  const sleep = (ms: number) =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
-    });
+  const setInfo = (infoMessage: string | null) => {
+    dispatch({ type: 'setInfo', infoMessage });
+  };
 
-  const resolveSessionAfterAuth = async () => {
-    const retryDelaysMs = [0, 150, 400];
-    let lastError: unknown = null;
-
-    for (const delayMs of retryDelaysMs) {
-      if (delayMs > 0) {
-        await sleep(delayMs);
-      }
-
-      try {
-        return await requireApi().getSession();
-      } catch (error) {
-        lastError = error;
-
-        if (!(error instanceof AuthApiError) || error.status !== 401) {
-          throw error;
-        }
-      }
-    }
-
-    throw lastError ?? new AuthApiError('Authentication required.');
+  const syncDrafts = ({
+    email,
+    password,
+    handle,
+    avatarUrl,
+  }: {
+    email?: string;
+    password?: string;
+    handle?: string;
+    avatarUrl?: string;
+  }) => {
+    dispatch({ type: 'setDraftCredentials', email, password, handle, avatarUrl });
   };
 
   const restoreSession = async () => {
@@ -61,12 +53,13 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     try {
       const session = await requireApi().getSession();
       dispatch({ type: 'setAuthenticated', user: session.user });
-      dispatch({
-        type: 'setDraftSignIn',
-        userId: session.user.userId,
+      syncDrafts({
         email: session.user.email,
+        password: '',
+        handle: session.user.userId,
         avatarUrl: session.user.avatarUrl ?? '',
       });
+      setInfo(null);
       setError(null);
     } catch (error) {
       if (error instanceof AuthApiError && error.status === 401) {
@@ -81,190 +74,205 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     }
   };
 
-  const startAuth = async (
-    {
-      rawUserId,
-      rawEmail,
-      rawAvatarUrl,
-      intent,
-    }: {
-      rawUserId: string;
-      rawEmail?: string;
-      rawAvatarUrl?: string;
-      intent: AuthIntent;
-    },
-    mode: 'start' | 'resend' = 'start',
-  ) => {
-    const userId = normalizeUserId(rawUserId);
-    const email = rawEmail ? normalizeEmail(rawEmail) : '';
+  const setAuthView = (authView: AuthView) => {
+    dispatch({ type: 'setAuthView', authView });
+    setError(null);
+    setInfo(null);
+  };
+
+  const clearError = () => {
+    setError(null);
+  };
+
+  const clearInfo = () => {
+    setInfo(null);
+  };
+
+  const login = async ({ rawEmail, rawPassword }: { rawEmail: string; rawPassword: string }) => {
+    const email = normalizeEmail(rawEmail);
+    const password = rawPassword;
+    syncDrafts({ email, password });
+    setError(null);
+    setInfo(null);
+
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+
+    if (!isValidPassword(password)) {
+      setError('Password must be 8-128 characters.');
+      return;
+    }
+
+    dispatch({ type: 'setLoading', loadingAction: 'login' });
+
+    try {
+      const response = await requireApi().login({ email, password });
+      dispatch({ type: 'setAuthenticated', user: response.user });
+      syncDrafts({
+        email: response.user.email,
+        password: '',
+        handle: response.user.userId,
+        avatarUrl: response.user.avatarUrl ?? '',
+      });
+    } catch (error) {
+      setError(toAuthErrorMessage('login', error));
+    } finally {
+      dispatch({ type: 'setLoading', loadingAction: null });
+    }
+  };
+
+  const register = async ({
+    rawEmail,
+    rawPassword,
+    rawHandle,
+    rawAvatarUrl,
+  }: {
+    rawEmail: string;
+    rawPassword: string;
+    rawHandle: string;
+    rawAvatarUrl?: string;
+  }) => {
+    const email = normalizeEmail(rawEmail);
+    const password = rawPassword;
+    const handle = normalizeHandle(rawHandle);
     const avatarUrl = (rawAvatarUrl ?? '').trim();
-    dispatch({ type: 'setDraftSignIn', userId, email, avatarUrl, intent });
+    syncDrafts({ email, password, handle, avatarUrl });
     setError(null);
+    setInfo(null);
 
-    if (!isValidUserId(userId)) {
-      setError('Choose a user ID with 3-24 lowercase letters, numbers, or underscores.');
-      return;
-    }
-
-    if (intent === 'REGISTER' && !isValidEmail(email)) {
+    if (!isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
     }
 
-    dispatch({
-      type: 'setLoading',
-      loadingAction: mode === 'resend' ? 'resendAuth' : 'startAuth',
-    });
+    if (!isValidPassword(password)) {
+      setError('Password must be 8-128 characters.');
+      return;
+    }
+
+    if (!isValidHandle(handle)) {
+      setError('Handle must be 3-30 characters using lowercase letters, numbers, underscores, or hyphens.');
+      return;
+    }
+
+    dispatch({ type: 'setLoading', loadingAction: 'register' });
 
     try {
-      const response = await requireApi().startAuth({
-        userId,
-        email: email || undefined,
-        mode: intent,
+      const response = await requireApi().register({
+        email,
+        password,
+        handle,
         avatarUrl: avatarUrl || undefined,
       });
-      dispatch({
-        type: 'setCheckEmail',
-        userId,
-        email: response.email ?? email,
-        maskedEmail: response.maskedEmail,
-        mode: intent,
-        avatarUrl: avatarUrl || undefined,
-        nextAllowedResendAt: response.nextAllowedResendAt,
-      });
-      setError(null);
+      dispatch({ type: 'setAuthView', authView: 'LOGIN' });
+      dispatch({ type: 'setDraftCredentials', password: '' });
+      setInfo(`Check ${response.maskedEmail} for your verification link.`);
     } catch (error) {
-      setError(toAuthErrorMessage(mode, error));
+      setError(toAuthErrorMessage('register', error));
     } finally {
       dispatch({ type: 'setLoading', loadingAction: null });
     }
   };
 
-  const resendAuth = async () => {
-    const state = getState().authState;
-
-    if (state.type !== 'CHECK_EMAIL') {
-      return;
-    }
-
-    await startAuth(
-      {
-        rawUserId: state.userId,
-        rawEmail: state.email,
-        rawAvatarUrl: state.avatarUrl,
-        intent: state.mode,
-      },
-      'resend',
-    );
-  };
-
-  const verifyCode = async (
-    {
-      rawUserId,
-      rawEmail,
-      rawCode,
-    }: {
-      rawUserId: string;
-      rawEmail?: string;
-      rawCode: string;
-    },
-  ) => {
-    const userId = normalizeUserId(rawUserId);
-    const email = rawEmail ? normalizeEmail(rawEmail) : '';
-    const code = sanitizeCode(rawCode);
-    dispatch({ type: 'setDraftSignIn', userId, email, avatarUrl: getState().draftAvatarUrl });
+  const forgotPassword = async ({ rawEmail }: { rawEmail: string }) => {
+    const email = normalizeEmail(rawEmail);
+    syncDrafts({ email });
     setError(null);
+    setInfo(null);
 
-    if (!isValidUserId(userId)) {
-      setError('Invalid user ID.');
-      return;
-    }
-
-    if (email && !isValidEmail(email)) {
+    if (!isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
     }
 
-    if (code.length !== 6) {
-      setError('Enter the 6-digit code from your email.');
-      return;
-    }
-
-    dispatch({ type: 'setLoading', loadingAction: 'verifyCode' });
+    dispatch({ type: 'setLoading', loadingAction: 'forgotPassword' });
 
     try {
-      const authResponse = await requireApi().verifyCode({ userId, email: email || undefined, code });
-      dispatch({ type: 'setAuthenticated', user: authResponse.user });
-      dispatch({
-        type: 'setDraftSignIn',
-        userId: authResponse.user.userId,
-        email: authResponse.user.email,
-        avatarUrl: authResponse.user.avatarUrl ?? '',
-      });
-      setError(null);
+      await requireApi().forgotPassword({ email });
+      setInfo(`If that email exists, you'll receive a reset link.`);
     } catch (error) {
-      setError(toAuthErrorMessage('verifyCode', error));
+      setError(toAuthErrorMessage('forgotPassword', error));
     } finally {
       dispatch({ type: 'setLoading', loadingAction: null });
     }
   };
 
-  const verifyLink = async (token: string) => {
+  const verifyEmail = async (token: string) => {
+    const trimmedToken = token.trim();
     setError(null);
+    setInfo(null);
 
-    if (!token.trim()) {
+    if (!trimmedToken) {
       dispatch({ type: 'setUnauthenticated' });
-      setError('This sign-in link is invalid or has expired.');
+      setError('This verification link is invalid or has expired.');
       return;
     }
 
-    dispatch({ type: 'setLoading', loadingAction: 'verifyLink' });
+    dispatch({ type: 'setLoading', loadingAction: 'verifyEmail' });
 
     try {
-      const authResponse = await requireApi().verifyLink(token.trim());
-      dispatch({ type: 'setAuthenticated', user: authResponse.user });
-      dispatch({
-        type: 'setDraftSignIn',
-        userId: authResponse.user.userId,
-        email: authResponse.user.email,
-        avatarUrl: authResponse.user.avatarUrl ?? '',
+      const response = await requireApi().verifyEmail({ token: trimmedToken });
+      dispatch({ type: 'setAuthenticated', user: response.user });
+      syncDrafts({
+        email: response.user.email,
+        password: '',
+        handle: response.user.userId,
+        avatarUrl: response.user.avatarUrl ?? '',
       });
-      setError(null);
     } catch (error) {
       dispatch({ type: 'setUnauthenticated' });
-      setError(toAuthErrorMessage('verifyLink', error));
+      setError(toAuthErrorMessage('verifyEmail', error));
     } finally {
       dispatch({ type: 'setLoading', loadingAction: null });
     }
   };
 
-  const useDifferentEmail = () => {
-    const current = getState().authState;
+  const resetPassword = async ({
+    token,
+    rawNewPassword,
+  }: {
+    token: string;
+    rawNewPassword: string;
+  }) => {
+    const trimmedToken = token.trim();
+    const newPassword = rawNewPassword;
+    setError(null);
+    setInfo(null);
 
-    if (current.type === 'CHECK_EMAIL') {
-      dispatch({
-        type: 'setDraftSignIn',
-        userId: current.userId,
-        email: current.email,
-        avatarUrl: current.avatarUrl ?? '',
-        intent: current.mode,
-      });
+    if (!trimmedToken) {
+      setError('This reset link is invalid or has expired.');
+      return false;
     }
 
-    dispatch({ type: 'setUnauthenticated' });
-    setError(null);
+    if (!isValidPassword(newPassword)) {
+      setError('Password must be 8-128 characters.');
+      return false;
+    }
+
+    dispatch({ type: 'setLoading', loadingAction: 'resetPassword' });
+
+    try {
+      await requireApi().resetPassword({ token: trimmedToken, newPassword });
+      dispatch({ type: 'setDraftCredentials', password: '' });
+      return true;
+    } catch (error) {
+      setError(toAuthErrorMessage('resetPassword', error));
+      return false;
+    } finally {
+      dispatch({ type: 'setLoading', loadingAction: null });
+    }
   };
 
   const logout = async () => {
     const current = getState().authState;
-    const fallbackUserId = current.type === 'AUTHENTICATED' ? current.user.userId : getState().draftUserId;
     const fallbackEmail = current.type === 'AUTHENTICATED' ? current.user.email : getState().draftEmail;
-    const fallbackAvatar = current.type === 'AUTHENTICATED'
-      ? (current.user.avatarUrl ?? '')
-      : getState().draftAvatarUrl;
+    const fallbackHandle = current.type === 'AUTHENTICATED' ? current.user.userId : getState().draftHandle;
 
     dispatch({ type: 'setLoading', loadingAction: 'logout' });
     setError(null);
+    setInfo(null);
 
     try {
       if (api) {
@@ -274,19 +282,15 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
       console.warn('Auth logout failed', error);
       setError(toAuthErrorMessage('logout', error));
     } finally {
-      dispatch({
-        type: 'setDraftSignIn',
-        userId: fallbackUserId,
+      syncDrafts({
         email: fallbackEmail,
-        avatarUrl: fallbackAvatar,
+        password: '',
+        handle: fallbackHandle,
+        avatarUrl: current.type === 'AUTHENTICATED' ? (current.user.avatarUrl ?? '') : getState().draftAvatarUrl,
       });
       dispatch({ type: 'setUnauthenticated' });
       dispatch({ type: 'setLoading', loadingAction: null });
     }
-  };
-
-  const clearError = () => {
-    setError(null);
   };
 
   const updateLocalProfile = (updates: { avatarUrl?: string | null }) => {
@@ -302,23 +306,25 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     };
 
     dispatch({ type: 'setAuthenticated', user: nextUser });
-    dispatch({
-      type: 'setDraftSignIn',
-      userId: nextUser.userId,
+    syncDrafts({
       email: nextUser.email,
+      password: '',
+      handle: nextUser.userId,
       avatarUrl: nextUser.avatarUrl ?? '',
     });
   };
 
   return {
     restoreSession,
-    startAuth,
-    resendAuth,
-    verifyCode,
-    verifyLink,
-    useDifferentEmail,
+    setAuthView,
+    login,
+    register,
+    forgotPassword,
+    verifyEmail,
+    resetPassword,
     logout,
     clearError,
+    clearInfo,
     updateLocalProfile,
   };
 };

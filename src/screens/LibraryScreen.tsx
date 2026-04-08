@@ -111,7 +111,9 @@ export function LibraryScreen({ navigation }: Props) {
 
       if (existingPublishedSongId && !isOrphaned) {
         await backendApi.disownCommunitySong(existingPublishedSongId);
-        await deleteSong(song.id);
+        // deleteSong fires a fire-and-forget HTTP delete internally (void return).
+        // Only call it after the disown API call confirms success above.
+        deleteSong(song.id);
         setStatusMessage(`"${song.title}" released — it's now free to be claimed by the community.`);
       } else {
         await backendApi.publishSong(song.id);

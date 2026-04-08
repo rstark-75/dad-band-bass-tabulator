@@ -2,7 +2,6 @@ import { AuthApiError } from '../src/features/auth/api/authApi.ts';
 import { createAuthActions } from '../src/features/auth/state/authActions.ts';
 import { authReducer, getAuthRouteMode } from '../src/features/auth/state/authReducer.ts';
 import { initialAuthStoreState } from '../src/features/auth/state/authTypes.ts';
-import { sanitizeCode } from '../src/features/auth/utils/codeInput.ts';
 
 const runTest = async (name: string, fn: () => Promise<void> | void) => {
   try {
@@ -63,89 +62,89 @@ const run = async () => {
     }
   });
 
-  await runTest('start auth transitions to CHECK_EMAIL', async () => {
+  await runTest('register stores login state and info message', async () => {
+    let receivedAvatarUrl: string | undefined;
     const harness = createHarness({
-      startAuth: async () => ({
-        status: 'EMAIL_SENT' as const,
+      register: async (payload: { avatarUrl?: string }) => {
+        receivedAvatarUrl = payload.avatarUrl;
+        return ({
+        status: 'VERIFICATION_EMAIL_SENT' as const,
         maskedEmail: 'r***@example.com',
-        nextAllowedResendAt: null,
-      }),
+        });
+      },
     });
 
-    await harness.actions.startAuth({
-      rawUserId: 'rob',
+    await harness.actions.register({
       rawEmail: ' Rob@Example.com ',
-      intent: 'LOGIN',
+      rawPassword: 'secret123',
+      rawHandle: 'rob',
+      rawAvatarUrl: 'https://cdn.example.com/avatar.png',
     });
 
-    const state = harness.getState().authState;
+    const state = harness.getState();
 
-    if (state.type !== 'CHECK_EMAIL') {
-      throw new Error('Expected CHECK_EMAIL state after startAuth.');
+    if (state.authView !== 'LOGIN') {
+      throw new Error('Expected LOGIN auth view after successful registration.');
     }
 
-    if (state.email !== 'rob@example.com') {
-      throw new Error(`Expected normalized email, got ${state.email}`);
+    if (state.draftEmail !== 'rob@example.com') {
+      throw new Error(`Expected normalized email, got ${state.draftEmail}`);
     }
 
-    if (state.userId !== 'rob') {
-      throw new Error(`Expected normalized userId, got ${state.userId}`);
+    if (state.draftHandle !== 'rob') {
+      throw new Error(`Expected normalized handle, got ${state.draftHandle}`);
+    }
+
+    if (state.draftAvatarUrl !== 'https://cdn.example.com/avatar.png') {
+      throw new Error(`Expected draft avatar, got ${state.draftAvatarUrl}`);
+    }
+
+    if (receivedAvatarUrl !== 'https://cdn.example.com/avatar.png') {
+      throw new Error(`Expected avatarUrl in register payload, got ${receivedAvatarUrl}`);
+    }
+
+    if (!state.infoMessage?.includes('r***@example.com')) {
+      throw new Error('Expected verification email info message.');
     }
   });
 
-  await runTest('code sanitization keeps six digits only', () => {
-    const sanitized = sanitizeCode(' 12a3-45 67 ');
-
-    if (sanitized !== '123456') {
-      throw new Error(`Expected 123456, got ${sanitized}`);
-    }
-  });
-
-  await runTest('verify link flow authenticates user', async () => {
+  await runTest('verify email flow authenticates user', async () => {
     const harness = createHarness({
-      verifyLink: async () => ({
+      verifyEmail: async () => ({
         status: 'AUTHENTICATED' as const,
         user: { id: 'usr_2', userId: 'anne', email: 'anne@example.com', displayName: 'Anne' },
       }),
-      getSession: async () => ({
-        authenticated: true as const,
-        user: { id: 'usr_2', userId: 'anne', email: 'anne@example.com', displayName: 'Anne' },
-      }),
     });
 
-    await harness.actions.verifyLink('token-123');
+    await harness.actions.verifyEmail('token-123');
 
     if (harness.getState().authState.type !== 'AUTHENTICATED') {
-      throw new Error('Expected AUTHENTICATED state after verifyLink.');
+      throw new Error('Expected AUTHENTICATED state after verifyEmail.');
     }
   });
 
-  await runTest('verify code falls back to session and authenticates when verify payload is unexpected', async () => {
+  await runTest('login authenticates user', async () => {
     const harness = createHarness({
-      verifyCode: async () => {
-        throw new Error('Unexpected verify payload shape');
-      },
-      getSession: async () => ({
-        authenticated: true as const,
+      login: async () => ({
+        status: 'AUTHENTICATED' as const,
         user: {
-          id: 'usr_session',
-          userId: 'session_user',
-          email: 'session@example.com',
-          displayName: 'Session User',
+          id: 'usr_login',
+          userId: 'login_user',
+          email: 'login@example.com',
+          displayName: 'Login User',
         },
       }),
     });
 
-    await harness.actions.verifyCode({
-      rawUserId: 'session_user',
-      rawEmail: 'session@example.com',
-      rawCode: '123456',
+    await harness.actions.login({
+      rawEmail: 'login@example.com',
+      rawPassword: 'secret123',
     });
 
     const state = harness.getState().authState;
 
     if (state.type !== 'AUTHENTICATED') {
-      throw new Error('Expected AUTHENTICATED via session fallback after verifyCode failure.');
+      throw new Error('Expected AUTHENTICATED after login.');
     }
   });
 
@@ -164,12 +163,8 @@ const run = async () => {
 
   await runTest('logout clears auth state even if backend logout fails', async () => {
     const harness = createHarness({
-      verifyLink: async () => ({
+      verifyEmail: async () => ({
         status: 'AUTHENTICATED' as const,
-        user: { id: 'usr_3', userId: 'rob', email: 'rob@example.com', displayName: 'Rob' },
-      }),
-      getSession: async () => ({
-        authenticated: true as const,
         user: { id: 'usr_3', userId: 'rob', email: 'rob@example.com', displayName: 'Rob' },
       }),
       logout: async () => {
@@ -177,7 +172,7 @@ const run = async () => {
       },
     });
 
-    await harness.actions.verifyLink('token-456');
+    await harness.actions.verifyEmail('token-456');
     await harness.actions.logout();
 
     const state = harness.getState();

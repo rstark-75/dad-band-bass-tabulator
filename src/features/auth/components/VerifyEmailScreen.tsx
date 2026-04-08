@@ -1,25 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { PrimaryButton } from '../../../components/PrimaryButton';
 import { ScreenContainer } from '../../../components/ScreenContainer';
 import { palette } from '../../../constants/colors';
-import { brandDisplayFontFamily } from '../../../constants/typography';
 import { RootStackParamList } from '../../../navigation/types';
 import { useAuth } from '../state/useAuth';
+import { authScreenStyles as styles } from './authScreenStyles';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'AuthCallback'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'VerifyEmail'>;
 
-export function AuthCallbackScreen({ route, navigation }: Props) {
-  const {
-    authState,
-    errorMessage,
-    loadingAction,
-    verifyLink,
-    clearError,
-    useDifferentEmail,
-  } = useAuth();
+export function VerifyEmailScreen({ route, navigation }: Props) {
+  const { authState, errorMessage, loadingAction, verifyEmail, clearError, setAuthView } = useAuth();
   const [attempt, setAttempt] = useState(0);
   const fallbackTokenFromUrl = useMemo(() => {
     if (
@@ -46,7 +39,7 @@ export function AuthCallbackScreen({ route, navigation }: Props) {
 
     return fallbackTokenFromUrl;
   }, [fallbackTokenFromUrl, route.params?.token]);
-  const isVerifying = loadingAction === 'verifyLink';
+  const isVerifying = loadingAction === 'verifyEmail';
   const isAuthenticated = authState.type === 'AUTHENTICATED';
 
   useEffect(() => {
@@ -56,21 +49,32 @@ export function AuthCallbackScreen({ route, navigation }: Props) {
       return;
     }
 
-    void verifyLink(token);
-  }, [attempt, clearError, token, verifyLink]);
+    void verifyEmail(token);
+  }, [attempt, clearError, token, verifyEmail]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'MainTabs' }],
+    });
+  }, [isAuthenticated, navigation]);
 
   if (!token) {
     return (
       <ScreenContainer scroll={false} contentStyle={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Invalid sign-in link</Text>
-          <Text style={styles.body}>
-            This sign-in link is missing information. Please request a new one.
+        <View style={[styles.card, styles.centerCard]}>
+          <Text style={styles.title}>Invalid verification link</Text>
+          <Text style={[styles.body, styles.centeredBody]}>
+            This verification link is missing its token.
           </Text>
           <PrimaryButton
-            label="Back to sign in"
+            label="Back to Sign In"
             onPress={() => {
-              useDifferentEmail();
+              setAuthView('LOGIN');
               navigation.replace('AuthEntry');
             }}
           />
@@ -81,71 +85,35 @@ export function AuthCallbackScreen({ route, navigation }: Props) {
 
   return (
     <ScreenContainer scroll={false} contentStyle={styles.container}>
-      <View style={styles.card}>
+      <View style={[styles.card, styles.centerCard]}>
         {isVerifying ? <ActivityIndicator color={palette.primary} /> : null}
-        <Text style={styles.title}>{isAuthenticated ? 'Signed in' : 'Signing you in...'}</Text>
-        <Text style={styles.body}>
+        <Text style={styles.title}>{isAuthenticated ? 'Email verified' : 'Verifying email...'}</Text>
+        <Text style={[styles.body, styles.centeredBody]}>
           {isAuthenticated
-            ? 'You are now signed in.'
-            : 'Please wait while we verify your secure sign-in link.'}
+            ? 'Your account is verified. Redirecting you into BassTab.'
+            : 'Please wait while we verify your email link.'}
         </Text>
 
         {!isVerifying && !isAuthenticated && errorMessage ? (
-          <>
-            <Text style={styles.errorText}>{errorMessage}</Text>
+          <View style={styles.actions}>
+            <Text style={[styles.errorText, styles.centeredBody]}>{errorMessage}</Text>
             <PrimaryButton
-              label="Try link again"
+              label="Try Again"
               onPress={() => {
                 setAttempt((value) => value + 1);
               }}
             />
             <PrimaryButton
               variant="ghost"
-              label="Back to sign in"
+              label="Back to Sign In"
               onPress={() => {
-                useDifferentEmail();
+                setAuthView('LOGIN');
                 navigation.replace('AuthEntry');
               }}
             />
-          </>
+          </View>
         ) : null}
       </View>
     </ScreenContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  card: {
-    width: '100%',
-    maxWidth: 440,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-    borderRadius: 24,
-    padding: 22,
-    gap: 12,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: palette.text,
-    fontFamily: brandDisplayFontFamily,
-  },
-  body: {
-    fontSize: 15,
-    color: palette.textMuted,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  errorText: {
-    color: palette.danger,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-});

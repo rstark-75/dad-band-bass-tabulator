@@ -12,28 +12,34 @@ export interface SessionResponse {
   user: UserDto;
 }
 
-export interface StartAuthRequest {
-  userId: string;
-  email?: string;
-  mode: 'LOGIN' | 'REGISTER';
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  handle: string;
   avatarUrl?: string;
 }
 
-export interface StartAuthResponse {
-  status: 'EMAIL_SENT';
+export interface RegisterResponse {
+  status: 'VERIFICATION_EMAIL_SENT';
   maskedEmail: string;
-  email?: string;
-  nextAllowedResendAt?: string | null;
 }
 
-export interface VerifyLinkRequest {
+export interface VerifyEmailRequest {
   token: string;
 }
 
-export interface VerifyCodeRequest {
-  userId: string;
-  email?: string;
-  code: string;
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
 }
 
 export interface AuthenticatedResponse {

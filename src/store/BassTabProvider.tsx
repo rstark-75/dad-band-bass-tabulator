@@ -24,7 +24,7 @@ import { Song, SongChart, SongRow, Setlist } from '../types/models';
 import { createId } from '../utils/ids';
 import { loadSnapshotFile, saveSnapshotFile, stateStorageLabel } from '../utils/stateSnapshot';
 import { mergeChartIntoSongRows } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
+import { DEFAULT_BEAT_COUNT, getSlotsPerBar, parseTab } from '../utils/tabLayout';
 
 interface SongInput {
   title?: string;
@@ -44,6 +44,7 @@ interface LegacySection {
     label: string;
     beforeText: string;
     afterText: string;
+    barNotes?: string[];
   }>;
   rowBarCounts?: number[];
 }
@@ -82,7 +83,10 @@ interface BassTabContextValue {
   setActiveSetlist: (setlistId: string) => void;
   deleteSong: (songId: string) => void;
   updateSong: (songId: string, updates: Partial<Song>) => void;
-  updateSongChart: (songId: string, chart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts'>) => void;
+  updateSongChart: (
+    songId: string,
+    chart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts' | 'defaultBeatCount'>,
+  ) => void;
   addSongToSetlist: (songId: string) => void;
   removeSongFromSetlist: (songId: string) => void;
   moveSetlistSong: (songId: string, direction: -1 | 1) => void;
@@ -134,15 +138,18 @@ const createEmptyRow = (
   label,
   beforeText: '',
   afterText: '',
+  defaultBeatCount: DEFAULT_BEAT_COUNT,
   bars: Array.from({ length: 4 }, () => ({
+    beatCount: DEFAULT_BEAT_COUNT,
     cells: {
       ...Object.fromEntries(
         stringNames.map((stringName) => [
           stringName,
-          Array.from({ length: 8 }, () => '-'),
+          Array.from({ length: getSlotsPerBar(DEFAULT_BEAT_COUNT) }, () => '-'),
         ]),
       ),
     },
+    note: '',
   })),
 });
 
@@ -228,9 +235,9 @@ const migrateLegacySong = (legacySong: Song | LegacySong): Song => {
           rowAnnotations:
             section.rowAnnotations?.map((annotation, rowIndex: number) =>
               rowIndex === 0
-                ? { ...annotation, label: annotation.label || section.name }
-                : annotation,
-            ) ?? [{ label: section.name, beforeText: '', afterText: '' }],
+                ? { ...annotation, label: annotation.label || section.name, barNotes: annotation.barNotes ?? [] }
+                : { ...annotation, barNotes: annotation.barNotes ?? [] },
+            ) ?? [{ label: section.name, beforeText: '', afterText: '', barNotes: [] }],
           rowBarCounts: section.rowBarCounts ?? [],
         },
       );
@@ -637,9 +644,13 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     void (async () => {
       try {
         await backendApi.deleteSong(songId);
-        await backendApi.replacePlaylistOrder({ songIds: nextActiveSongIds });
       } catch (error) {
         console.warn('BassTab backend deleteSong failed', error);
+      }
+      try {
+        await backendApi.replacePlaylistOrder({ songIds: nextActiveSongIds });
+      } catch (error) {
+        console.warn('BassTab backend replacePlaylistOrder failed after delete', error);
       }
     })();
   };
@@ -709,7 +720,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
 
   const updateSongChart = (
     songId: string,
-    chart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts'>,
+    chart: Pick<SongChart, 'tab' | 'rowAnnotations' | 'rowBarCounts' | 'defaultBeatCount'>,
   ) => {
     const syncState = { nextSongForSync: null as Song | null };
 
