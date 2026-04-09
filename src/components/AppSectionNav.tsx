@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -36,6 +37,8 @@ export function AppSectionNav({
   onAICreate,
   onGoPro,
 }: AppSectionNavProps) {
+  const { width } = useWindowDimensions();
+  const isCompactLayout = width < 760;
   const { authState, logout, loadingAction, updateLocalProfile } = useAuth();
   const { tier, priceLabel } = useSubscription();
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -92,7 +95,7 @@ export function AppSectionNav({
   return (
     <>
       <View style={styles.container}>
-        <View style={styles.row}>
+        <View style={[styles.row, isCompactLayout && styles.rowCompact]}>
           <PrimaryButton
             label="Home"
             onPress={onHome}
@@ -131,9 +134,9 @@ export function AppSectionNav({
           />
         </View>
         {signedInUser ? (
-          <View style={styles.accountCluster}>
+          <View style={[styles.accountCluster, isCompactLayout && styles.accountClusterCompact]}>
             <Text style={styles.accountLabel}>Signed in</Text>
-            <Text style={styles.accountUserId} numberOfLines={1}>
+            <Text style={styles.accountUserId} numberOfLines={1} ellipsizeMode="tail">
               @{signedInUserId ?? 'unknown'}
             </Text>
             <View style={[styles.tierPill, tier === 'PRO' ? styles.tierPillPro : styles.tierPillFree]}>
@@ -394,6 +397,10 @@ const styles = StyleSheet.create({
     gap: 10,
     flex: 1,
   },
+  rowCompact: {
+    flex: 0,
+    width: '100%',
+  },
   accountCluster: {
     minWidth: 280,
     maxWidth: 520,
@@ -407,6 +414,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
+  },
+  accountClusterCompact: {
+    width: '100%',
+    minWidth: 0,
+    maxWidth: '100%',
+    alignSelf: 'stretch',
   },
   accountLabel: {
     fontSize: 10,
