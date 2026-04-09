@@ -14,6 +14,7 @@ export type SongListItemProps = {
   contributorName?: string;
   contributorAvatarUrl?: string | null;
   contributionDate?: string;
+  subtext?: string;
   voteScore: number;
   userVote: 'UP' | 'DOWN' | null;
   onPreview?: () => void;
@@ -40,6 +41,7 @@ export function SongListItem({
   contributorName,
   contributorAvatarUrl,
   contributionDate,
+  subtext,
   voteScore,
   userVote,
   onPreview,
@@ -140,6 +142,9 @@ export function SongListItem({
             </Text>
           </View>
         ) : null}
+        {subtext ? (
+          <Text style={styles.subtext} numberOfLines={1}>{subtext}</Text>
+        ) : null}
       </View>
 
       <View style={styles.actionsColumn}>
@@ -206,7 +211,8 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderRadius: 18,
     backgroundColor: palette.surface,
     borderWidth: 1,
@@ -214,8 +220,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   containerPressed: {
-    backgroundColor: '#020617',
-    borderColor: '#475569',
+    backgroundColor: palette.surfaceMuted,
+    borderColor: palette.border,
   },
   voteColumn: {
     width: 50,
@@ -317,6 +323,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9ca3af',
     flex: 1,
+  },
+  subtext: {
+    fontSize: 11,
+    color: palette.textMuted,
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   orphanBadge: {
     alignSelf: 'flex-start',

@@ -7,6 +7,7 @@ import { PrimaryButton } from './PrimaryButton';
 
 interface LibrarySongCardProps {
   song: Song;
+  subtext?: string;
   onEdit: () => void;
   onLive: () => void;
   onDelete: () => void;
@@ -23,6 +24,7 @@ interface LibrarySongCardProps {
 
 export function LibrarySongCard({
   song,
+  subtext,
   onEdit,
   onLive,
   onDelete,
@@ -73,6 +75,9 @@ export function LibrarySongCard({
             </View>
           ) : null}
         </View>
+        {subtext ? (
+          <Text style={styles.subtext} numberOfLines={1}>{subtext}</Text>
+        ) : null}
       </Pressable>
 
       <View style={styles.footer}>
@@ -102,7 +107,7 @@ export function LibrarySongCard({
               style={isCommunityActionLocked ? styles.lockedAction : undefined}
             />
           ) : null}
-          <PrimaryButton label="Bin Song" onPress={onDelete} variant="danger" />
+          <PrimaryButton label="Bin it" onPress={onDelete} variant="danger" />
         </View>
       </View>
     </View>
@@ -178,6 +183,13 @@ const styles = StyleSheet.create({
   },
   lockedAction: {
     opacity: 0.55,
+  },
+  subtext: {
+    fontSize: 11,
+    color: palette.textMuted,
+    fontStyle: 'italic',
+    opacity: 0.8,
+    marginTop: -6,
   },
   footer: {
     gap: 12,

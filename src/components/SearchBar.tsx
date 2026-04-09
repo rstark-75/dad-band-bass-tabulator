@@ -5,13 +5,14 @@ import { palette } from '../constants/colors';
 interface SearchBarProps {
   value: string;
   onChangeText: (text: string) => void;
+  placeholder?: string;
 }
 
-export function SearchBar({ value, onChangeText }: SearchBarProps) {
+export function SearchBar({ value, onChangeText, placeholder = 'Search songs, artists, or keys' }: SearchBarProps) {
   return (
     <View style={styles.container}>
       <TextInput
-        placeholder="Search songs, artists, or keys"
+        placeholder={placeholder}
         placeholderTextColor={palette.textMuted}
         value={value}
         onChangeText={onChangeText}

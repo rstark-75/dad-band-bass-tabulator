@@ -14,6 +14,8 @@ import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
+import { Circle, Svg, Text as SvgText } from 'react-native-svg';
+
 import { BassTabApiError, CommunitySongCardDto, createBassTabApiFromEnv } from '../api';
 import { AppSectionNav } from '../components/AppSectionNav';
 import { EmptyState } from '../components/EmptyState';
@@ -170,6 +172,40 @@ function AuthorChip({ author, fallbackName, style }: AuthorChipProps) {
         {authorLine}
       </Text>
     </View>
+  );
+}
+
+const SONG_QUIPS = [
+  'Surprisingly solid.',
+  "Someone's had a go.",
+  'Bit ambitious.',
+  'Questionable in places.',
+  'Better than it sounds.',
+  'Technically a song.',
+  'May require courage.',
+  'Gets the job done.',
+  "You'll recognise it eventually.",
+  'Close enough.',
+  'Bit optimistic.',
+  'Needs confidence.',
+  'A noble attempt.',
+  'Points for effort.',
+];
+
+function getSongQuip(id: string): string {
+  const code = id.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  return SONG_QUIPS[code % SONG_QUIPS.length];
+}
+
+function DadBandBadge() {
+  return (
+    <Svg width={80} height={80} viewBox="0 0 120 120">
+      <Circle cx="60" cy="60" r="54" fill="none" stroke="#c8a96e" strokeWidth={3} />
+      <Circle cx="60" cy="60" r="44" fill="none" stroke="#c8a96e" strokeWidth={2} strokeDasharray="4 3" />
+      <SvgText x="60" y="65" textAnchor="middle" fontSize={18} fontWeight="bold" letterSpacing={2} fill="#f5e6c8" fontFamily="Arial">DAD BAND</SvgText>
+      <SvgText x="60" y="24" textAnchor="middle" fontSize={8} letterSpacing={1.5} fill="#c8a96e" fontFamily="Arial">COMMUNITY</SvgText>
+      <SvgText x="60" y="108" textAnchor="middle" fontSize={7} letterSpacing={1.2} fill="#c8a96e" fontFamily="Arial">QUALITY NOT GUARANTEED</SvgText>
+    </Svg>
   );
 }
 
@@ -474,8 +510,8 @@ export function ImportScreen({ navigation }: Props) {
       });
       const importedMessage =
         importStatus === 200
-          ? `Already imported "${importedSong.title}"—your existing copy is unchanged.`
-          : `Moved "${importedSong.title}" to your library.`;
+          ? "You've already got this one."
+          : `"${importedSong.title}" moved to your library.`;
       setStatusMessage(importedMessage);
 
     } catch (error) {
@@ -596,11 +632,7 @@ export function ImportScreen({ navigation }: Props) {
 
   return (
     <ScreenContainer>
-      <View style={styles.header}>
-        <Text style={styles.title}>Community Charts</Text>
-        <Text style={styles.subtitle}>
-          Find useful bass charts from the community and stash them for rehearsal.
-        </Text>
+      <View style={styles.navRow}>
         <AppSectionNav
           current="Import"
           onHome={() => navigation.navigate('Home')}
@@ -612,32 +644,40 @@ export function ImportScreen({ navigation }: Props) {
         />
       </View>
 
-      <View style={styles.planBanner}>
-        <Text style={styles.planTitle}>
-          {tier === 'PRO' ? 'Pro Community Access' : 'Free Community Access'}
-        </Text>
+      {/* Dark nameplate banner */}
+      <View style={styles.nameplate}>
+        <View style={styles.nameplateInner}>
+          <View style={styles.nameplateText}>
+            <Text style={styles.nameplateTitle}>Dad Band Community 🎸</Text>
+            <Text style={styles.nameplateSubtitle}>
+              Borrow someone else's questionable work. Some of it's decent. Some of it… isn't.
+            </Text>
+            <View style={styles.warningPill}>
+              <Text style={styles.warningPillText}>⚠️ Community tabs – quality not guaranteed</Text>
+            </View>
+          </View>
+          <View style={styles.badgeSlap}>
+            <DadBandBadge />
+          </View>
+        </View>
+      </View>
+
+      {/* Plan row — casual, not corporate */}
+      <View style={styles.planRow}>
         {tier !== 'PRO' ? (
-          <Text style={styles.planText}>
-            {hasCommunityLimit
-              ? `${communitySongsSaved} of ${planCommunitySaveLimit} community saves used`
-              : 'Unlimited community saves'}
-          </Text>
-        ) : null}
-        {tier !== 'PRO' && hasCommunityLimit && planCommunitySaveLimit > communitySongsSaved ? (
-          <Text style={styles.planSubText}>
-            Unlock unlimited saves to keep every community chart you love.
-          </Text>
-        ) : null}
-        {tier !== 'PRO' ? (
-          <Pressable
-            style={styles.proLink}
-            onPress={() => {
-              navigation.navigate('Upgrade');
-            }}
-          >
-            <Text style={styles.proLinkText}>See Pro benefits →</Text>
-          </Pressable>
-        ) : null}
+          <>
+            <Text style={styles.planText}>
+              {hasCommunityLimit
+                ? `${freeSaveSlotsLeft} save${freeSaveSlotsLeft === 1 ? '' : 's'} left on the free plan.`
+                : 'Unlimited saves.'}
+            </Text>
+            <Pressable onPress={() => navigation.navigate('Upgrade')}>
+              <Text style={styles.planLink}>Go Pro for more →</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Text style={styles.planText}>Pro: save everything (even the bad ones).</Text>
+        )}
       </View>
 
       <Text style={styles.statusText}>{statusMessage}</Text>
@@ -724,6 +764,7 @@ export function ImportScreen({ navigation }: Props) {
               onDownVote={() => {
                 void handleVote(song.id, 'DOWN');
               }}
+              subtext={getSongQuip(song.id)}
               actionLabel={
                 isOwner
                   ? song.ownershipStatus === 'ORPHANED'
@@ -732,10 +773,10 @@ export function ImportScreen({ navigation }: Props) {
                   : isSaving
                     ? 'Moving...'
                     : isInLibrary
-                      ? 'Already saved'
+                      ? 'Already in library'
                       : limitReached
                         ? 'Upgrade for more saves'
-                        : 'Copy Song to Library'
+                        : 'Steal This Tab'
               }
               onAction={
                 isOwner
@@ -822,55 +863,89 @@ export function ImportScreen({ navigation }: Props) {
   );
 }
 
+const NAMEPLATE_BG = '#1a120a';
+const NAMEPLATE_TEXT = '#f5e6c8';
+const NAMEPLATE_MUTED = '#a8957e';
+const NAMEPLATE_GOLD = '#c8a96e';
+
 const styles = StyleSheet.create({
-  header: {
-    gap: 6,
+  navRow: {
+    marginBottom: 4,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '800',
+  nameplate: {
+    backgroundColor: NAMEPLATE_BG,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: NAMEPLATE_GOLD,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 16,
+  },
+  nameplateInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  nameplateText: {
+    flex: 1,
+    gap: 8,
+  },
+  nameplateTitle: {
     fontFamily: brandDisplayFontFamily,
-    letterSpacing: 0.2,
-    color: palette.text,
-  },
-  subtitle: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: '#4b5563',
-  },
-  planBanner: {
-    borderRadius: 20,
-    padding: 16,
-    backgroundColor: '#0b0b0f',
-    borderWidth: 1,
-    borderColor: '#1f2937',
-    gap: 4,
-  },
-  proLink: {
-    alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  proLinkText: {
-    fontSize: 12,
-    letterSpacing: 0.5,
-    color: '#fbbf24',
-    fontWeight: '700',
-  },
-  planTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
-    color: '#f8fafc',
+    color: NAMEPLATE_TEXT,
+    flexShrink: 1,
+  },
+  nameplateSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: NAMEPLATE_MUTED,
+    fontStyle: 'italic',
+  },
+  warningPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2e1f0a',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#7a5520',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  warningPillText: {
+    fontSize: 11,
+    color: '#d4a04a',
+    fontWeight: '600',
+  },
+  badgeSlap: {
+    transform: [{ rotate: '-10deg' }],
+    shadowColor: '#000',
+    shadowOffset: { width: 3, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius: 0,
+    elevation: 5,
+  },
+  planRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    backgroundColor: palette.background,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: palette.border,
   },
   planText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#cbd5e1',
-  },
-  planSubText: {
     fontSize: 12,
-    lineHeight: 16,
-    color: '#9ca3af',
-    marginTop: 4,
+    color: palette.textMuted,
+    flex: 1,
+  },
+  planLink: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.accent,
   },
   statusText: {
     fontSize: 13,

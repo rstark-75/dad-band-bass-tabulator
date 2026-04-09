@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Circle, Svg, Text as SvgText } from 'react-native-svg';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { CompositeScreenProps } from '@react-navigation/native';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { AppSectionNav } from '../components/AppSectionNav';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { TabPagePreview } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
 import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../features/subscription';
@@ -15,6 +16,7 @@ import { BassTabApiError } from '../api';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { createBassTabApiFromEnv } from '../api';
+import { ParsedBar } from '../utils/tabLayout';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<TabParamList, 'AICreate'>,
@@ -34,6 +36,40 @@ const LOADING_QUIPS = [
   'Digging through the chord book…',
   'Capo on the wrong fret again…',
   'Blaming it on the amp settings…',
+];
+
+const GHOST_STRING_NAMES = ['G', 'D', 'A', 'E'];
+
+// Three patterns of controlled chaos. Musical in spirit, questionable in practice.
+const GHOST_PATTERNS: ParsedBar[][] = [
+  // Pattern A: "Open String Panic" — low frets, lots of open strings, vaguely bass-like
+  [
+    { beatCount: 4, cells: { G: ['-', '-', '5', '-', '-', '-', '7', '-'], D: ['0', '-', '-', '-', '5', '-', '-', '-'], A: ['-', '-', '-', '3', '-', '-', '-', '5'], E: ['-', '0', '-', '-', '-', '3', '-', '-'] } },
+    { beatCount: 4, cells: { G: ['-', '-', '7', '-', '-', '-', '5', '-'], D: ['0', '-', '-', '-', '7', '-', '-', '-'], A: ['-', '-', '-', '5', '-', '-', '-', '3'], E: ['-', '0', '-', '-', '-', '5', '-', '-'] } },
+    { beatCount: 4, cells: { G: ['5', '-', '-', '-', '7', '-', '-', '-'], D: ['-', '-', '5', '-', '-', '-', '0', '-'], A: ['-', '3', '-', '-', '-', '5', '-', '-'], E: ['0', '-', '-', '-', '3', '-', '-', '0'] } },
+    { beatCount: 4, cells: { G: ['-', '-', '5', '-', '7', '-', '-', '-'], D: ['0', '-', '-', '-', '-', '5', '-', '-'], A: ['-', '-', '3', '-', '-', '-', '5', '-'], E: ['-', '0', '-', '3', '-', '-', '-', '0'] } },
+  ],
+  // Pattern B: "Upper Register Regret" — frets 12–19, tapped feel, too many notes up high
+  [
+    { beatCount: 4, cells: { G: ['12', '-', '15', '-', '12', '-', '17', '-'], D: ['-', '14', '-', '-', '-', '14', '-', '12'], A: ['12', '-', '-', '16', '-', '-', '12', '-'], E: ['-', '-', '12', '-', '-', '15', '-', '-'] } },
+    { beatCount: 4, cells: { G: ['17', '-', '-', '12', '15', '-', '-', '-'], D: ['-', '12', '-', '-', '-', '16', '-', '-'], A: ['-', '-', '14', '-', '12', '-', '-', '17'], E: ['12', '-', '-', '-', '-', '12', '15', '-'] } },
+    { beatCount: 4, cells: { G: ['15', '-', '12', '-', '-', '19', '-', '12'], D: ['-', '-', '-', '12', '17', '-', '-', '-'], A: ['12', '16', '-', '-', '-', '-', '14', '-'], E: ['-', '-', '15', '-', '12', '-', '-', '12'] } },
+    { beatCount: 4, cells: { G: ['12', '-', '17', '-', '12', '-', '15', '-'], D: ['14', '-', '-', '12', '-', '19', '-', '-'], A: ['-', '12', '-', '-', '16', '-', '-', '12'], E: ['-', '-', '-', '15', '-', '-', '12', '-'] } },
+  ],
+  // Pattern C: "Pentatonic Catastrophe" — 0–9 range, almost-musical intervals, wrong strings
+  [
+    { beatCount: 4, cells: { G: ['-', '7', '-', '5', '-', '7', '-', '9'], D: ['5', '-', '-', '-', '7', '-', '5', '-'], A: ['-', '-', '5', '-', '-', '3', '-', '-'], E: ['0', '-', '-', '-', '0', '-', '-', '5'] } },
+    { beatCount: 4, cells: { G: ['9', '-', '7', '-', '5', '-', '-', '7'], D: ['-', '5', '-', '-', '-', '7', '-', '-'], A: ['3', '-', '-', '5', '-', '-', '3', '-'], E: ['-', '-', '0', '-', '5', '-', '-', '0'] } },
+    { beatCount: 4, cells: { G: ['-', '5', '7', '-', '-', '9', '-', '-'], D: ['7', '-', '-', '-', '5', '-', '7', '-'], A: ['-', '-', '-', '3', '-', '-', '-', '5'], E: ['0', '-', '5', '-', '-', '0', '-', '-'] } },
+    { beatCount: 4, cells: { G: ['7', '-', '-', '9', '-', '7', '5', '-'], D: ['-', '5', '-', '-', '7', '-', '-', '5'], A: ['-', '-', '3', '-', '-', '-', '5', '-'], E: ['0', '-', '-', '-', '0', '5', '-', '-'] } },
+  ],
+];
+
+const GHOST_COMMENTS = [
+  'We got a bit carried away here.',
+  'This felt right at the time.',
+  'Probably easier than it looks.',
+  'Confidence exceeded ability.',
 ];
 
 function DadBandBadge() {
@@ -80,7 +116,7 @@ function DadBandBadge() {
 }
 
 export function AISongCreationScreen({ navigation }: Props) {
-  const { tier } = useSubscription();
+  const { tier, capabilities } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const { importSongFromDto } = useBassTab();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
@@ -91,7 +127,26 @@ export function AISongCreationScreen({ navigation }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
   const [lessTerribleMode, setLessTerribleMode] = useState(false);
   const [quipIndex, setQuipIndex] = useState(0);
+  const [ghostPatternIndex, setGhostPatternIndex] = useState(() => Math.floor(Math.random() * GHOST_PATTERNS.length));
+  const [ghostCommentIndex, setGhostCommentIndex] = useState(() => Math.floor(Math.random() * GHOST_COMMENTS.length));
   const quipTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cursorOpacity = useRef(new Animated.Value(1)).current;
+
+  useFocusEffect(
+    useCallback(() => {
+      setGhostPatternIndex(Math.floor(Math.random() * GHOST_PATTERNS.length));
+      setGhostCommentIndex(Math.floor(Math.random() * GHOST_COMMENTS.length));
+
+      const blink = Animated.loop(
+        Animated.sequence([
+          Animated.timing(cursorOpacity, { toValue: 0, duration: 530, useNativeDriver: true }),
+          Animated.timing(cursorOpacity, { toValue: 1, duration: 530, useNativeDriver: true }),
+        ]),
+      );
+      blink.start();
+      return () => blink.stop();
+    }, []),
+  );
 
   useEffect(() => {
     if (generateState === 'generating') {
@@ -254,14 +309,20 @@ export function AISongCreationScreen({ navigation }: Props) {
 
           {/* Ghost preview — only shown while idle */}
           {generateState === 'idle' ? (
-            <View style={styles.ghostPreview}>
-              <Text style={styles.ghostLine}>{'──────────────────'}</Text>
-              <Text style={styles.ghostTab}>{'G|----------------'}</Text>
-              <Text style={styles.ghostTab}>{'D|----------------'}</Text>
-              <Text style={styles.ghostTab}>{'A|----------------'}</Text>
-              <Text style={styles.ghostTab}>{'E|----------------'}</Text>
-              <Text style={styles.ghostLine}>{'──────────────────'}</Text>
-              <Text style={styles.ghostCaption}>Your questionable masterpiece will appear here</Text>
+            <View style={styles.ghostCard}>
+              <View style={styles.ghostCardHeader}>
+                <Text style={styles.ghostCardTitle}>COULD BE SOMETHING LIKE THIS… (ON A GOOD DAY)</Text>
+                <Animated.Text style={[styles.ghostCursor, { opacity: cursorOpacity }]}>▌</Animated.Text>
+              </View>
+              <View style={styles.ghostPreview}>
+                <TabPagePreview
+                  stringNames={GHOST_STRING_NAMES}
+                  bars={GHOST_PATTERNS[ghostPatternIndex]}
+                  renderMode={capabilities.svgEnabled ? 'svg' : 'ascii'}
+                  svgScaleProfile="standard"
+                />
+              </View>
+              <Text style={styles.ghostComment}>{GHOST_COMMENTS[ghostCommentIndex]}</Text>
             </View>
           ) : null}
 
@@ -436,34 +497,42 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: palette.border,
   },
-  ghostPreview: {
+  ghostCard: {
     borderWidth: 1,
     borderColor: palette.border,
-    borderStyle: 'dashed',
-    borderRadius: 8,
+    borderRadius: 10,
+    backgroundColor: palette.surfaceMuted,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    gap: 2,
-    opacity: 0.45,
+    gap: 10,
+    overflow: 'hidden',
   },
-  ghostLine: {
-    fontFamily: 'monospace',
-    fontSize: 13,
-    color: palette.textMuted,
-    letterSpacing: 1,
+  ghostCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
-  ghostTab: {
-    fontFamily: 'monospace',
-    fontSize: 13,
-    color: palette.text,
-    letterSpacing: 0.5,
-  },
-  ghostCaption: {
+  ghostCardTitle: {
     fontSize: 11,
+    fontWeight: '700',
     color: palette.textMuted,
-    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    flexShrink: 1,
+  },
+  ghostCursor: {
+    fontSize: 13,
+    color: palette.primary,
+    lineHeight: 16,
+  },
+  ghostPreview: {
+    opacity: 0.75,
+  },
+  ghostComment: {
+    fontSize: 12,
+    color: palette.textMuted,
     fontStyle: 'italic',
-    marginTop: 6,
+    opacity: 0.9,
   },
   generatingRow: {
     flexDirection: 'row',
