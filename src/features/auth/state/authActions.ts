@@ -16,6 +16,13 @@ const isValidHandle = (value: string): boolean => /^[a-z0-9_-]{3,30}$/.test(valu
 const isValidPassword = (value: string): boolean => value.length >= 8 && value.length <= 128;
 
 export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
+  let authFlowVersion = 0;
+
+  const bumpAuthFlowVersion = () => {
+    authFlowVersion += 1;
+    return authFlowVersion;
+  };
+
   const requireApi = (): AuthApi => {
     if (!api) {
       throw new AuthApiError('Auth API base URL is not configured.');
@@ -47,12 +54,17 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
   };
 
   const restoreSession = async () => {
+    const restoreVersion = authFlowVersion;
     dispatch({ type: 'setLoading', loadingAction: 'restoreSession' });
     dispatch({ type: 'setRestoring' });
     setError(null);
 
     try {
       const session = await requireApi().getSession();
+      if (restoreVersion !== authFlowVersion) {
+        logClientEvent('info', 'auth.restore_session_ignored_stale_success');
+        return;
+      }
       logClientEvent('info', 'auth.restore_session_succeeded', {
         userId: session.user.userId,
       });
@@ -66,6 +78,10 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
       setInfo(null);
       setError(null);
     } catch (error) {
+      if (restoreVersion !== authFlowVersion) {
+        logClientEvent('info', 'auth.restore_session_ignored_stale_error');
+        return;
+      }
       if (error instanceof AuthApiError && error.status === 401) {
         logClientEvent('warn', 'auth.restore_session_unauthorized');
         dispatch({ type: 'setUnauthenticated' });
@@ -97,6 +113,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
   };
 
   const login = async ({ rawEmail, rawPassword }: { rawEmail: string; rawPassword: string }) => {
+    bumpAuthFlowVersion();
     const email = normalizeEmail(rawEmail);
     const password = rawPassword;
     syncDrafts({ email, password });
@@ -148,6 +165,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     rawHandle: string;
     rawAvatarUrl?: string;
   }) => {
+    bumpAuthFlowVersion();
     const email = normalizeEmail(rawEmail);
     const password = rawPassword;
     const handle = normalizeHandle(rawHandle);
@@ -197,6 +215,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
   };
 
   const forgotPassword = async ({ rawEmail }: { rawEmail: string }) => {
+    bumpAuthFlowVersion();
     const email = normalizeEmail(rawEmail);
     syncDrafts({ email });
     setError(null);
@@ -220,6 +239,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
   };
 
   const verifyEmail = async (token: string) => {
+    bumpAuthFlowVersion();
     const trimmedToken = token.trim();
     setError(null);
     setInfo(null);
@@ -256,6 +276,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     token: string;
     rawNewPassword: string;
   }) => {
+    bumpAuthFlowVersion();
     const trimmedToken = token.trim();
     const newPassword = rawNewPassword;
     setError(null);
@@ -286,6 +307,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
   };
 
   const logout = async () => {
+    bumpAuthFlowVersion();
     const current = getState().authState;
     const fallbackEmail = current.type === 'AUTHENTICATED' ? current.user.email : getState().draftEmail;
     const fallbackHandle = current.type === 'AUTHENTICATED' ? current.user.userId : getState().draftHandle;

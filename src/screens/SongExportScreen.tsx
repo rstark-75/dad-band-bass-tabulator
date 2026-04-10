@@ -171,7 +171,7 @@ export function SongExportScreen({ navigation, route }: Props) {
                 No Internet at GIG - then export your tabs to your device.
               </Text>
               <Text style={styles.lockedStringInfo}>
-                Strings: {stringCount}. Upgrade for 5 & 6-string stage-ready tabs.
+                Strings: {stringCount}. Upgrade for 5 string stage-ready tabs.
               </Text>
 
             <View style={styles.teaserCard}>

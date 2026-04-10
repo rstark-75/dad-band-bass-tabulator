@@ -26,9 +26,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const api = useMemo(() => createAuthApiFromEnv(), []);
   const [state, dispatch] = useReducer(authReducer, initialAuthStoreState);
   const stateRef = useRef(state);
+  const authenticatedSinceRef = useRef<number>(0);
 
   useEffect(() => {
     stateRef.current = state;
+
+    if (state.authState.type === 'AUTHENTICATED') {
+      if (authenticatedSinceRef.current === 0) {
+        authenticatedSinceRef.current = Date.now();
+      }
+      return;
+    }
+
+    authenticatedSinceRef.current = 0;
   }, [state]);
 
   const actions = useMemo(
@@ -50,6 +60,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const current = stateRef.current.authState;
 
       if (current.type !== 'AUTHENTICATED') {
+        return;
+      }
+
+      if (
+        authenticatedSinceRef.current !== 0 &&
+        event.requestedAt < authenticatedSinceRef.current
+      ) {
+        logClientEvent('info', 'auth.session_expired_ignored_stale_unauthorized', {
+          userId: current.user.userId,
+          endpoint: event.url,
+          method: event.method,
+          status: event.status,
+          requestedAt: event.requestedAt,
+          authenticatedSince: authenticatedSinceRef.current,
+        });
         return;
       }
 

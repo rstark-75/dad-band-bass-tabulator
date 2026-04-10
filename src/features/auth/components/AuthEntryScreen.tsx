@@ -9,17 +9,25 @@ import { RootStackParamList } from '../../../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AuthEntry'>;
 
-export function AuthEntryScreen({ route }: Props) {
+export function AuthEntryScreen({ navigation, route }: Props) {
   const { authView, setAuthView } = useAuth();
   const requestedView = route.params?.view;
 
   useEffect(() => {
-    if (!requestedView || requestedView === authView) {
+    if (!requestedView) {
       return;
     }
 
-    setAuthView(requestedView);
-  }, [authView, requestedView, setAuthView]);
+    if (requestedView !== authView) {
+      setAuthView(requestedView);
+    }
+
+    // Consume deep-link/entry intent so local auth-view switches are not overridden.
+    navigation.setParams({
+      view: undefined,
+      source: undefined,
+    });
+  }, [authView, navigation, requestedView, setAuthView]);
 
   if (authView === 'REGISTER') {
     return <RegisterScreen />;

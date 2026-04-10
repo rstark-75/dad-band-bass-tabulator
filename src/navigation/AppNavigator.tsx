@@ -7,7 +7,11 @@ import {
   getStateFromPath as getNativeStateFromPath,
 } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createNativeStackNavigator, NativeStackNavigationProp } from '@react-navigation/native-stack';
+import {
+  createNativeStackNavigator,
+  NativeStackNavigationProp,
+  NativeStackScreenProps,
+} from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
 import { palette } from '../constants/colors';
@@ -18,7 +22,6 @@ import { ResetPasswordScreen } from '../features/auth/components/ResetPasswordSc
 import { VerifyEmailScreen } from '../features/auth/components/VerifyEmailScreen';
 import { useAuth } from '../features/auth/state/useAuth';
 import { AccountScreen } from '../screens/AccountScreen';
-import { HomeScreen } from '../screens/HomeScreen';
 import { AISongCreationScreen } from '../screens/AISongCreationScreen';
 import { ImportDetailScreen } from '../screens/ImportDetailScreen';
 import { ImportPasteScreen } from '../screens/ImportPasteScreen';
@@ -237,9 +240,14 @@ export function AppNavigator() {
                 />
                 <Stack.Screen
                   name="Home"
-                  component={HomeScreen}
                   options={{ headerShown: false }}
-                />
+                >
+                  {(props) => (
+                    <LandingScreen
+                      {...(props as unknown as NativeStackScreenProps<RootStackParamList, 'Landing'>)}
+                    />
+                  )}
+                </Stack.Screen>
                 <Stack.Screen
                   name="Account"
                   component={AccountScreen}

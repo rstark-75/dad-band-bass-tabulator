@@ -79,6 +79,7 @@ export interface UnauthorizedEvent {
   url: string;
   method: string;
   status: number;
+  requestedAt: number;
 }
 
 type UnauthorizedListener = (event: UnauthorizedEvent) => void;
@@ -447,6 +448,7 @@ export class HttpBassTabApi implements BassTabApi {
   ): Promise<{ data: T; status: number }> {
     const url = joinPath(this.options.baseUrl, path);
     const method = init.method ?? 'GET';
+    const requestedAt = Date.now();
     let response: Response;
 
     console.info(`[BassTab API] ${method} ${url}`);
@@ -477,6 +479,7 @@ export class HttpBassTabApi implements BassTabApi {
           url,
           method,
           status: response.status,
+          requestedAt,
         });
       }
 

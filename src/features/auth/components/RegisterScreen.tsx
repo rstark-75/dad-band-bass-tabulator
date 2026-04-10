@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Image, Pressable, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { DadBandBrandBanner } from '../../../components/DadBandBrandBanner';
 import { PrimaryButton } from '../../../components/PrimaryButton';
 import { ScreenContainer } from '../../../components/ScreenContainer';
 import { palette } from '../../../constants/colors';
@@ -13,6 +14,8 @@ import { authScreenStyles as styles } from './authScreenStyles';
 const handlePattern = /^[a-z0-9_-]{3,30}$/;
 
 export function RegisterScreen() {
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 390;
   const {
     draftEmail,
     draftPassword,
@@ -32,6 +35,11 @@ export function RegisterScreen() {
   const [handle, setHandle] = useState(draftHandle);
   const [avatarUrl, setAvatarUrl] = useState(draftAvatarUrl);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [avatarOptionsOpen, setAvatarOptionsOpen] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [handleTouched, setHandleTouched] = useState(false);
+  const [focusedField, setFocusedField] = useState<null | 'email' | 'password' | 'handle' | 'avatarUrl'>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
   const normalizedHandle = useMemo(() => handle.trim().toLowerCase(), [handle]);
@@ -52,9 +60,9 @@ export function RegisterScreen() {
     !selectedPreset &&
     (normalizedAvatarUrl.startsWith('http://') || normalizedAvatarUrl.startsWith('https://'));
   const avatarIsValid = !hasAvatarInput || Boolean(selectedPreset) || showAvatarImage;
-  const showEmailError = (submitAttempted || normalizedEmail.length > 0) && !emailIsValid;
-  const showPasswordError = (submitAttempted || password.length > 0) && !passwordIsValid;
-  const showHandleError = (submitAttempted || normalizedHandle.length > 0) && !handleIsValid;
+  const showEmailError = (submitAttempted || emailTouched) && !emailIsValid;
+  const showPasswordError = (submitAttempted || passwordTouched) && !passwordIsValid;
+  const showHandleError = (submitAttempted || handleTouched) && !handleIsValid;
   const showAvatarError = hasAvatarInput && !avatarIsValid;
   const isSubmitting = loadingAction === 'register';
 
@@ -76,14 +84,24 @@ export function RegisterScreen() {
   return (
     <ScreenContainer contentStyle={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>Start free with BassTab</Text>
-        <Text style={styles.body}>
-          Make your account and start building your library in minutes.
-        </Text>
+        <View style={localStyles.introBlock}>
+          <DadBandBrandBanner variant="compact" subtitle="Rehearsal-night edition" />
+
+          <Text style={[styles.title, isNarrow && localStyles.titleNarrow]}>Start your first bass tab</Text>
+          <Text style={styles.body}>
+            Create your account and get your first song ready in minutes.
+          </Text>
+          <View style={localStyles.reassuranceCard}>
+            <Text style={localStyles.reassuranceTitle}>Start with:</Text>
+            <Text style={localStyles.reassuranceLine}>• Your own song library</Text>
+            <Text style={localStyles.reassuranceLine}>• Community tabs to borrow and tweak</Text>
+            <Text style={localStyles.reassuranceLine}>• AI starter tabs when you're stuck</Text>
+          </View>
+        </View>
 
         {infoMessage ? <Text style={styles.successText}>{infoMessage}</Text> : null}
 
-        <View style={styles.field}>
+        <View style={[styles.field, localStyles.firstField]}>
           <Text style={styles.label}>Email</Text>
           <TextInput
             autoFocus
@@ -94,7 +112,11 @@ export function RegisterScreen() {
             autoComplete="email"
             placeholder="you@example.com"
             placeholderTextColor="#94a3b8"
-            style={[styles.input, showEmailError && styles.inputError]}
+            style={[
+              styles.input,
+              focusedField === 'email' && localStyles.inputFocus,
+              showEmailError && localStyles.inputSoftError,
+            ]}
             value={email}
             onChangeText={(value) => {
               setEmail(value);
@@ -104,6 +126,13 @@ export function RegisterScreen() {
               if (infoMessage) {
                 clearInfo();
               }
+            }}
+            onFocus={() => {
+              setFocusedField('email');
+            }}
+            onBlur={() => {
+              setFocusedField((current) => (current === 'email' ? null : current));
+              setEmailTouched(true);
             }}
             returnKeyType="next"
           />
@@ -124,7 +153,8 @@ export function RegisterScreen() {
               style={[
                 styles.input,
                 styles.passwordInput,
-                showPasswordError && styles.inputError,
+                focusedField === 'password' && localStyles.inputFocus,
+                showPasswordError && localStyles.inputSoftError,
               ]}
               value={password}
               onChangeText={(value) => {
@@ -132,6 +162,13 @@ export function RegisterScreen() {
                 if (errorMessage) {
                   clearError();
                 }
+              }}
+              onFocus={() => {
+                setFocusedField('password');
+              }}
+              onBlur={() => {
+                setFocusedField((current) => (current === 'password' ? null : current));
+                setPasswordTouched(true);
               }}
               returnKeyType="next"
             />
@@ -159,7 +196,7 @@ export function RegisterScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Handle</Text>
+          <Text style={styles.label}>Display name</Text>
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
@@ -167,13 +204,24 @@ export function RegisterScreen() {
             autoComplete="username"
             placeholder="myhandle"
             placeholderTextColor="#94a3b8"
-            style={[styles.input, showHandleError && styles.inputError]}
+            style={[
+              styles.input,
+              focusedField === 'handle' && localStyles.inputFocus,
+              showHandleError && localStyles.inputSoftError,
+            ]}
             value={handle}
             onChangeText={(value) => {
               setHandle(value.toLowerCase());
               if (errorMessage) {
                 clearError();
               }
+            }}
+            onFocus={() => {
+              setFocusedField('handle');
+            }}
+            onBlur={() => {
+              setFocusedField((current) => (current === 'handle' ? null : current));
+              setHandleTouched(true);
             }}
             onSubmitEditing={() => {
               void submit();
@@ -182,155 +230,192 @@ export function RegisterScreen() {
           />
           {showHandleError ? (
             <Text style={styles.inlineError}>
-              Handle must be 3-30 characters using lowercase letters, numbers, `_`, or `-`.
+              Use 3-30 characters: lowercase letters, numbers, `_`, or `-`.
             </Text>
           ) : (
-            <Text style={styles.hint}>3-30 chars, lowercase letters, numbers, `_`, or `-`.</Text>
+            <Text style={styles.hint}>Pick a display name for the community — you can change it later.</Text>
           )}
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Avatar</Text>
-          <View
-            style={[
-              styles.avatarCard,
-              showAvatarError && styles.avatarCardError,
-            ]}
+          <Pressable
+            style={({ pressed }) => [localStyles.avatarToggle, pressed && localStyles.avatarTogglePressed]}
+            onPress={() => {
+              setAvatarOptionsOpen((value) => !value);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={avatarOptionsOpen ? 'Hide avatar options' : 'Add avatar options'}
           >
-            <View style={styles.avatarPreviewWrap}>
-              {showAvatarImage && !avatarLoadFailed ? (
-                <Image
-                  source={{ uri: normalizedAvatarUrl }}
-                  style={styles.avatarImage}
-                  onError={() => setAvatarLoadFailed(true)}
-                />
-              ) : selectedPreset ? (
-                <View
-                  style={[
-                    styles.avatarFallback,
-                    {
-                      backgroundColor: selectedPreset.background,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.avatarPresetGlyph,
-                      {
-                        color: selectedPreset.textColor,
-                      },
-                    ]}
-                  >
-                    {selectedPreset.glyph}
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarFallbackText}>{avatarInitial}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.avatarCopy}>
-              <Text style={styles.avatarTitle}>Profile avatar</Text>
-              <Text style={styles.avatarHint}>
-                Pick a preset or use a full `http(s)` image URL.
-              </Text>
-            </View>
-          </View>
+            <Text style={localStyles.avatarToggleText}>
+              {avatarOptionsOpen ? 'Hide avatar options' : 'Add avatar (optional)'}
+            </Text>
+            <Ionicons
+              name={avatarOptionsOpen ? 'chevron-up-outline' : 'chevron-down-outline'}
+              size={16}
+              color="#6b7280"
+            />
+          </Pressable>
 
-          <Text style={styles.label}>Pick a preset</Text>
-          <View style={styles.presetRow}>
-            {avatarPresets.map((preset) => {
-              const isSelected = selectedPreset?.id === preset.id;
-
-              return (
-                <Pressable
-                  key={preset.id}
-                  onPress={() => {
-                    setAvatarUrl(avatarPresetValue(preset.id));
-                    setAvatarLoadFailed(false);
-                    if (errorMessage) {
-                      clearError();
-                    }
-                  }}
-                  style={[
-                    styles.presetOption,
-                    isSelected && styles.presetOptionSelected,
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.presetBubble,
-                      { backgroundColor: preset.background },
-                    ]}
-                  >
-                    <Text
+          {avatarOptionsOpen ? (
+            <>
+              <View
+                style={[
+                  styles.avatarCard,
+                  showAvatarError && styles.avatarCardError,
+                ]}
+              >
+                <View style={styles.avatarPreviewWrap}>
+                  {showAvatarImage && !avatarLoadFailed ? (
+                    <Image
+                      source={{ uri: normalizedAvatarUrl }}
+                      style={styles.avatarImage}
+                      onError={() => setAvatarLoadFailed(true)}
+                    />
+                  ) : selectedPreset ? (
+                    <View
                       style={[
-                        styles.presetGlyph,
-                        { color: preset.textColor },
+                        styles.avatarFallback,
+                        {
+                          backgroundColor: selectedPreset.background,
+                        },
                       ]}
                     >
-                      {preset.glyph}
-                    </Text>
-                  </View>
-                  <Text style={styles.presetLabel} numberOfLines={1}>
-                    {preset.label}
+                      <Text
+                        style={[
+                          styles.avatarPresetGlyph,
+                          {
+                            color: selectedPreset.textColor,
+                          },
+                        ]}
+                      >
+                        {selectedPreset.glyph}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.avatarFallback}>
+                      <Text style={styles.avatarFallbackText}>{avatarInitial}</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.avatarCopy}>
+                  <Text style={styles.avatarTitle}>Profile avatar</Text>
+                  <Text style={styles.avatarHint}>
+                    Pick a preset or use a full `http(s)` image URL.
                   </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                </View>
+              </View>
 
-          <Text style={styles.label}>Avatar URL (optional)</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            placeholder="https://..."
-            placeholderTextColor="#94a3b8"
-            style={[styles.input, showAvatarError && styles.inputError]}
-            value={avatarUrl}
-            onChangeText={(value) => {
-              setAvatarUrl(value);
-              setAvatarLoadFailed(false);
-              if (errorMessage) {
-                clearError();
-              }
-            }}
-            returnKeyType="done"
-            onSubmitEditing={() => {
-              void submit();
-            }}
-          />
-          <PrimaryButton
-            label="Clear Avatar"
-            variant="ghost"
-            size="compact"
-            onPress={() => {
-              setAvatarUrl('');
-              setAvatarLoadFailed(false);
-              if (errorMessage) {
-                clearError();
-              }
-            }}
-          />
-          {showAvatarError ? (
-            <Text style={styles.inlineError}>Use a preset or full `http(s)` image URL.</Text>
-          ) : null}
+              <Text style={styles.label}>Pick a preset</Text>
+              <View style={styles.presetRow}>
+                {avatarPresets.map((preset) => {
+                  const isSelected = selectedPreset?.id === preset.id;
+
+                  return (
+                    <Pressable
+                      key={preset.id}
+                      onPress={() => {
+                        setAvatarUrl(avatarPresetValue(preset.id));
+                        setAvatarLoadFailed(false);
+                        if (errorMessage) {
+                          clearError();
+                        }
+                      }}
+                      style={[
+                        styles.presetOption,
+                        isSelected && styles.presetOptionSelected,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.presetBubble,
+                          { backgroundColor: preset.background },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.presetGlyph,
+                            { color: preset.textColor },
+                          ]}
+                        >
+                          {preset.glyph}
+                        </Text>
+                      </View>
+                      <Text style={styles.presetLabel} numberOfLines={1}>
+                        {preset.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.label}>Avatar URL (optional)</Text>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                placeholder="https://..."
+                placeholderTextColor="#94a3b8"
+                style={[
+                  styles.input,
+                  focusedField === 'avatarUrl' && localStyles.inputFocus,
+                  showAvatarError && localStyles.inputSoftError,
+                ]}
+                value={avatarUrl}
+                onChangeText={(value) => {
+                  setAvatarUrl(value);
+                  setAvatarLoadFailed(false);
+                  if (errorMessage) {
+                    clearError();
+                  }
+                }}
+                onFocus={() => {
+                  setFocusedField('avatarUrl');
+                }}
+                onBlur={() => {
+                  setFocusedField((current) => (current === 'avatarUrl' ? null : current));
+                }}
+                returnKeyType="done"
+                onSubmitEditing={() => {
+                  void submit();
+                }}
+              />
+              <PrimaryButton
+                label="Clear Avatar"
+                variant="ghost"
+                size="compact"
+                onPress={() => {
+                  setAvatarUrl('');
+                  setAvatarLoadFailed(false);
+                  if (errorMessage) {
+                    clearError();
+                  }
+                }}
+              />
+              {showAvatarError ? (
+                <Text style={styles.inlineError}>Use a preset or full `http(s)` image URL.</Text>
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.hint}>Skip this for now and start playing faster.</Text>
+          )}
         </View>
 
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
-        <PrimaryButton
-          label={isSubmitting ? 'Creating account...' : 'Register'}
-          onPress={() => {
-            void submit();
-          }}
-          disabled={isSubmitting}
-        />
+        <View style={localStyles.ctaBlock}>
+          <Text style={localStyles.nextStep}>Next: you'll land straight in your library.</Text>
+          <PrimaryButton
+            label={isSubmitting ? 'Creating account...' : 'Start Playing'}
+            onPress={() => {
+              void submit();
+            }}
+            disabled={isSubmitting}
+          />
+          <Text style={localStyles.ctaReassurance}>No pressure. Just bass.</Text>
+        </View>
 
-        <View style={styles.linkRow}>
-          <Text style={styles.linkText}>Already have an account?</Text>
+        <View style={[styles.linkRow, localStyles.secondaryRow]}>
+          <Text style={[styles.linkText, localStyles.secondaryText]}>Already have an account?</Text>
           <PrimaryButton
             label="Back to Sign In"
             variant="ghost"
@@ -346,3 +431,84 @@ export function RegisterScreen() {
     </ScreenContainer>
   );
 }
+
+const localStyles = StyleSheet.create({
+  introBlock: {
+    gap: 10,
+  },
+  reassuranceCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e7dcc7',
+    backgroundColor: '#fffdfa',
+    padding: 12,
+    gap: 4,
+  },
+  reassuranceTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#2f2012',
+  },
+  reassuranceLine: {
+    fontSize: 13,
+    color: '#5b4d3e',
+    lineHeight: 18,
+  },
+  inputFocus: {
+    borderColor: '#c8bca7',
+    backgroundColor: '#fffdf8',
+  },
+  inputSoftError: {
+    borderColor: '#c97c1e',
+    backgroundColor: '#fffaf1',
+  },
+  avatarToggle: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e1d8c8',
+    backgroundColor: '#f9f4ea',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  avatarTogglePressed: {
+    opacity: 0.85,
+  },
+  avatarToggleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4f4233',
+  },
+  ctaReassurance: {
+    fontSize: 12,
+    color: '#8a7b6c',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  ctaBlock: {
+    gap: 8,
+    marginTop: 2,
+  },
+  nextStep: {
+    fontSize: 12,
+    color: '#6b5c4f',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  titleNarrow: {
+    fontSize: 28,
+    lineHeight: 34,
+  },
+  firstField: {
+    marginTop: -4,
+  },
+  secondaryRow: {
+    marginTop: 2,
+  },
+  secondaryText: {
+    color: '#7c6f60',
+    fontWeight: '600',
+  },
+});

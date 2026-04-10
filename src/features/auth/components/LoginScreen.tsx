@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { DadBandBrandBanner } from '../../../components/DadBandBrandBanner';
 import { PrimaryButton } from '../../../components/PrimaryButton';
 import { ScreenContainer } from '../../../components/ScreenContainer';
 import { palette } from '../../../constants/colors';
@@ -45,6 +46,7 @@ export function LoginScreen() {
   return (
     <ScreenContainer contentStyle={styles.container}>
       <View style={styles.card}>
+        <DadBandBrandBanner variant="compact" subtitle="Sign in and jump straight back in" />
         <Text style={styles.title}>Welcome back to BassTab</Text>
         <Text style={styles.body}>
           Pick up where you left off.

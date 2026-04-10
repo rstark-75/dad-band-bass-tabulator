@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Circle, Line, Svg, Text as SvgText } from 'react-native-svg';
 
 import { BassBackdrop } from '../components/BassBackdrop';
+import { DadBandBrandBanner } from '../components/DadBandBrandBanner';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
 import { useAuth } from '../features/auth/state/useAuth';
@@ -82,6 +83,12 @@ export function LandingScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={[styles.page, { paddingHorizontal: pagePaddingH, gap: pageGap }]}>
 
+          <DadBandBrandBanner
+            variant="full"
+            subtitle="Rehearsal-night edition"
+            supportingLine="From first draft to stage view, keep your low end organised."
+          />
+
           {/* ── Hero ── */}
           <View style={styles.heroWrap}>
             <View style={styles.heroBlobOne} />
@@ -89,12 +96,6 @@ export function LandingScreen({ navigation }: Props) {
             <View style={[styles.heroCard, { padding: heroCardPadding }, isDesktop && styles.heroCardRow]}>
 
               <View style={[styles.heroMain, isDesktop && styles.heroMainFlex]}>
-                <Text style={styles.eyebrow}>Dad Band Bass — rehearsal-night edition</Text>
-                <View style={styles.badgeStrip}>
-                  <BadgeSticker label="PUB SET READY" tone="warm" rotation="-4deg" />
-                  <BadgeSticker label="4 STRINGS, NO PANIC" tone="cool" rotation="3deg" />
-                  {!isMobile && <BadgeSticker label="REHEARSAL-NIGHT EDITION" tone="neutral" rotation="-2deg" />}
-                </View>
                 <Text style={[styles.heroTitle, { fontSize: heroTitleSize, lineHeight: heroTitleSize * 1.08, maxWidth: isMobile ? undefined : isTablet ? 480 : 540 }]}>
                   The bass tab workspace for rehearsals, gigs, and real-life chaos.
                 </Text>
@@ -109,29 +110,40 @@ export function LandingScreen({ navigation }: Props) {
                     <ChaosTag label="Nobody noticed, it's fine" />
                   </View>
                 )}
-                <View style={[styles.heroActions, isMobile && styles.heroActionsNarrow]}>
-                  <Pressable
-                    style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
-                    onPress={startFree}
-                  >
-                    <Text style={styles.primaryButtonLabel}>Start Free</Text>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-                    onPress={signIn}
-                  >
-                    <Text style={styles.secondaryButtonLabel}>Sign In</Text>
-                  </Pressable>
-                </View>
-                <Text style={styles.reassurance}>No card. No pressure. Just bass.</Text>
-                <Pressable
-                  style={({ pressed }) => [styles.openAppLink, pressed && styles.pressed]}
-                  onPress={openApp}
-                >
-                  <Text style={styles.openAppLinkLabel}>
-                    {isAuthenticated ? 'Open App' : 'Already have an account? Open App'}
-                  </Text>
-                </Pressable>
+                {isAuthenticated ? (
+                  <View style={[styles.heroActions, isMobile && styles.heroActionsNarrow]}>
+                    <Pressable
+                      style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+                      onPress={openApp}
+                    >
+                      <Text style={styles.primaryButtonLabel}>Back to App</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <>
+                    <View style={[styles.heroActions, isMobile && styles.heroActionsNarrow]}>
+                      <Pressable
+                        style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+                        onPress={startFree}
+                      >
+                        <Text style={styles.primaryButtonLabel}>Start Free</Text>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+                        onPress={signIn}
+                      >
+                        <Text style={styles.secondaryButtonLabel}>Sign In</Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.reassurance}>No card. No pressure. Just bass.</Text>
+                    <Pressable
+                      style={({ pressed }) => [styles.openAppLink, pressed && styles.pressed]}
+                      onPress={openApp}
+                    >
+                      <Text style={styles.openAppLinkLabel}>Already have an account? Open App</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
 
               <View
@@ -316,21 +328,34 @@ export function LandingScreen({ navigation }: Props) {
             <Text style={styles.finalCtaBody}>
               Start free, keep your low end organised, upgrade only when you need more room.
             </Text>
-            <View style={[styles.heroActions, isMobile && styles.heroActionsNarrow]}>
-              <Pressable
-                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
-                onPress={startFree}
-              >
-                <Text style={styles.primaryButtonLabel}>Start Free</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-                onPress={signIn}
-              >
-                <Text style={styles.secondaryButtonLabel}>Sign In</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.reassurance}>No card. No pressure. Just bass.</Text>
+            {isAuthenticated ? (
+              <View style={[styles.heroActions, isMobile && styles.heroActionsNarrow]}>
+                <Pressable
+                  style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+                  onPress={openApp}
+                >
+                  <Text style={styles.primaryButtonLabel}>Back to App</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <>
+                <View style={[styles.heroActions, isMobile && styles.heroActionsNarrow]}>
+                  <Pressable
+                    style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+                    onPress={startFree}
+                  >
+                    <Text style={styles.primaryButtonLabel}>Start Free</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+                    onPress={signIn}
+                  >
+                    <Text style={styles.secondaryButtonLabel}>Sign In</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.reassurance}>No card. No pressure. Just bass.</Text>
+              </>
+            )}
           </View>
 
         </View>
@@ -340,30 +365,6 @@ export function LandingScreen({ navigation }: Props) {
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
-
-function BadgeSticker({
-  label,
-  tone,
-  rotation,
-}: {
-  label: string;
-  tone: 'warm' | 'cool' | 'neutral';
-  rotation: string;
-}) {
-  return (
-    <View
-      style={[
-        styles.badgeSticker,
-        tone === 'warm' && styles.badgeStickerWarm,
-        tone === 'cool' && styles.badgeStickerCool,
-        tone === 'neutral' && styles.badgeStickerNeutral,
-        { transform: [{ rotate: rotation }] },
-      ]}
-    >
-      <Text style={styles.badgeStickerLabel}>{label}</Text>
-    </View>
-  );
-}
 
 function ChaosTag({ label }: { label: string }) {
   return (
@@ -495,43 +496,6 @@ const styles = StyleSheet.create({
   },
   heroMainFlex: {
     flex: 1,
-  },
-  eyebrow: {
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    fontWeight: '800',
-    color: '#8a5c20',
-  },
-  badgeStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  badgeSticker: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  badgeStickerWarm: {
-    borderColor: '#92400e',
-    backgroundColor: '#fde68a',
-  },
-  badgeStickerCool: {
-    borderColor: '#115e59',
-    backgroundColor: '#99f6e4',
-  },
-  badgeStickerNeutral: {
-    borderColor: '#cbd5e1',
-    backgroundColor: '#eef2ff',
-  },
-  badgeStickerLabel: {
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: '900',
-    letterSpacing: 0.4,
-    color: '#2b1a0b',
   },
   heroTitle: {
     fontFamily: brandDisplayFontFamily,

@@ -27,7 +27,7 @@ const benefits = [
   },
   {
     icon: '🎸',
-    title: '5 & 6-String Support',
+    title: '5 String Support',
     detail: 'Write extended-range parts for low-B and beyond.',
   },
   {

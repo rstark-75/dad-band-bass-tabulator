@@ -187,7 +187,7 @@ export function SetlistExportScreen({ navigation }: Props) {
                 {orderedSongs.length} song{orderedSongs.length === 1 ? '' : 's'} ready
               </Text>
               <Text style={styles.lockedStringInfo}>
-                Strings: {firstSongStringCount}. Upgrade for 5 & 6-string stage-ready tabs.
+                Strings: {firstSongStringCount}. Upgrade for 5 string stage-ready tabs.
               </Text>
               <Text style={styles.teaserLabel}>Limited display</Text>
               {orderedSongs.slice(0, 4).map((song, index) => (

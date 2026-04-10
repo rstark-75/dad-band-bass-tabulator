@@ -12,7 +12,7 @@ const proBenefits = [
   'Unlimited songs',
   'Unlimited setlists',
   'Performance Mode (SVG)',
-  '5 & 6-string support',
+  '5 String support',
   'Community access',
   'Support from creators',
 ];
