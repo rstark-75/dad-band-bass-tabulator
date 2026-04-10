@@ -70,7 +70,7 @@ type Props = CompositeScreenProps<
 >;
 
 export function LibraryScreen({ navigation }: Props) {
-  const { tier } = useSubscription();
+  const { tier, capabilities } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const { authState } = useAuth();
   const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
@@ -286,7 +286,7 @@ export function LibraryScreen({ navigation }: Props) {
               isOrphanedInCommunity={isOrphanedInCommunity}
               onLockedCommunityAction={() => showUpgradePrompt('COMMUNITY_SAVE')}
               isCommunityReleaseUpdating={publishingSongId === song.id}
-              isCommunityActionLocked={tier === 'FREE'}
+              isCommunityActionLocked={capabilities.maxCommunitySaves !== null}
               onRepublish={
                 !isOrphanedInCommunity && publishedInfo?.publishedSongId
                   ? () => {

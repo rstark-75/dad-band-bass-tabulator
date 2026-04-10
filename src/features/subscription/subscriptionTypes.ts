@@ -15,6 +15,8 @@ export interface SubscriptionCapabilities {
   maxCommunitySaves: number | null;
   maxStringCount: number | null;
   svgEnabled: boolean;
+  maxAiGenerations: number | null;
+  maxDailyAiGenerations: number | null;
 }
 
 export interface SubscriptionSnapshot {

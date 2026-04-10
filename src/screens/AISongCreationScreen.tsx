@@ -174,6 +174,8 @@ export function AISongCreationScreen({ navigation }: Props) {
   const hasSongLimit = tier === 'FREE' && maxSongs !== null;
   const remainingSongSlots = hasSongLimit ? Math.max(maxSongs - songs.length, 0) : null;
   const isLibraryFull = hasSongLimit && remainingSongSlots === 0;
+  const dailyAiLimit = capabilities.maxDailyAiGenerations;
+  const totalAiLimit = capabilities.maxAiGenerations;
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
@@ -267,9 +269,9 @@ export function AISongCreationScreen({ navigation }: Props) {
               <Text style={styles.planText}>
                 {isLibraryFull
                   ? 'Free plan — library full. No room for new AI tracks. '
-                  : `Free plan — limited generations${
+                  : `Free plan — ${dailyAiLimit != null ? `${dailyAiLimit}/day` : 'limited'} AI generations${totalAiLimit != null ? ` (${totalAiLimit} total)` : ''}${
                     typeof remainingSongSlots === 'number'
-                      ? ` and ${remainingSongSlots} song slot${remainingSongSlots === 1 ? '' : 's'} left`
+                      ? `, ${remainingSongSlots} song slot${remainingSongSlots === 1 ? '' : 's'} left`
                       : ''
                   }. `}
               </Text>
@@ -279,7 +281,7 @@ export function AISongCreationScreen({ navigation }: Props) {
             </View>
           ) : (
             <View style={styles.planRow}>
-              <Text style={styles.planText}>Pro — high daily limit included.</Text>
+              <Text style={styles.planText}>Pro — {dailyAiLimit != null ? `${dailyAiLimit} AI generations per day` : 'unlimited AI generation'} included.</Text>
             </View>
           )}
 

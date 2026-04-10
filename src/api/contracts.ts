@@ -75,6 +75,8 @@ export interface SubscriptionCapabilitiesDto {
   maxCommunitySaves: number | null;
   maxStringCount: number | null;
   svgEnabled: boolean;
+  maxAiGenerations?: number | null;
+  maxDailyAiGenerations?: number | null;
 }
 
 export interface SubscriptionSnapshotDto {
@@ -302,7 +304,9 @@ const isSubscriptionCapabilitiesDto = (value: unknown): value is SubscriptionCap
     isNullableNumber(value.maxCommunitySongs) &&
     isNullableNumber(value.maxCommunitySaves) &&
     isNullableNumber(value.maxStringCount) &&
-    typeof value.svgEnabled === 'boolean'
+    typeof value.svgEnabled === 'boolean' &&
+    (value.maxAiGenerations === undefined || isNullableNumber(value.maxAiGenerations)) &&
+    (value.maxDailyAiGenerations === undefined || isNullableNumber(value.maxDailyAiGenerations))
   );
 };
 

@@ -35,9 +35,11 @@ const defaultFreeSnapshot: SubscriptionSnapshot = {
     maxSongs: 10,
     maxSetlists: 1,
     maxCommunitySongs: 2,
-    maxCommunitySaves: 2,
+    maxCommunitySaves: 0,
     maxStringCount: 4,
     svgEnabled: false,
+    maxAiGenerations: 15,
+    maxDailyAiGenerations: 3,
   },
   communitySongsSaved: 0,
 };
@@ -75,6 +77,8 @@ const mapSnapshot = (snapshot: SubscriptionSnapshotDto): SubscriptionSnapshot =>
     maxCommunitySaves: snapshot.capabilities.maxCommunitySaves,
     maxStringCount: snapshot.capabilities.maxStringCount,
     svgEnabled: snapshot.capabilities.svgEnabled,
+    maxAiGenerations: snapshot.capabilities.maxAiGenerations ?? null,
+    maxDailyAiGenerations: snapshot.capabilities.maxDailyAiGenerations ?? null,
   },
 });
 
@@ -96,7 +100,11 @@ const defaultCapabilityDefaults: SubscriptionCapabilityDefaults = {
   free: defaultFreeSnapshot.capabilities,
   pro: {
     ...defaultFreeSnapshot.capabilities,
+    maxSongs: null,
+    maxSetlists: null,
     maxStringCount: null,
+    maxAiGenerations: null,
+    maxDailyAiGenerations: 20,
   },
 };
 
@@ -110,6 +118,8 @@ const mapCapabilityDefaults = (
     maxCommunitySaves: defaults.free.maxCommunitySaves,
     maxStringCount: defaults.free.maxStringCount,
     svgEnabled: defaults.free.svgEnabled,
+    maxAiGenerations: defaults.free.maxAiGenerations ?? null,
+    maxDailyAiGenerations: defaults.free.maxDailyAiGenerations ?? null,
   },
   pro: {
     maxSongs: defaults.pro.maxSongs,
@@ -118,6 +128,8 @@ const mapCapabilityDefaults = (
     maxCommunitySaves: defaults.pro.maxCommunitySaves,
     maxStringCount: defaults.pro.maxStringCount,
     svgEnabled: defaults.pro.svgEnabled,
+    maxAiGenerations: defaults.pro.maxAiGenerations ?? null,
+    maxDailyAiGenerations: defaults.pro.maxDailyAiGenerations ?? null,
   },
 });
 
