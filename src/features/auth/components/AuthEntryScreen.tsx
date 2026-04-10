@@ -10,8 +10,14 @@ import { RootStackParamList } from '../../../navigation/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'AuthEntry'>;
 
 export function AuthEntryScreen({ navigation, route }: Props) {
-  const { authView, setAuthView } = useAuth();
+  const { authState, authView, setAuthView } = useAuth();
   const requestedView = route.params?.view;
+
+  useEffect(() => {
+    if (authState.type === 'AUTHENTICATED') {
+      navigation.replace('MainTabs');
+    }
+  }, [authState.type, navigation]);
 
   useEffect(() => {
     if (!requestedView) {
