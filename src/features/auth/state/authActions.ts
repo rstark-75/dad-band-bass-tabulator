@@ -273,7 +273,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     }
   };
 
-  const verifyEmail = async (token: string) => {
+  const verifyEmail = async (token: string): Promise<{ errorCode: string } | undefined> => {
     bumpAuthFlowVersion();
     const trimmedToken = token.trim();
     setError(null);
@@ -282,7 +282,7 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     if (!trimmedToken) {
       dispatch({ type: 'setUnauthenticated' });
       setError('This verification link is invalid or has expired.');
-      return;
+      return { errorCode: 'INVALID_OR_EXPIRED_TOKEN' };
     }
 
     dispatch({ type: 'setLoading', loadingAction: 'verifyEmail' });
@@ -299,6 +299,8 @@ export const createAuthActions = ({ api, dispatch, getState }: ActionDeps) => {
     } catch (error) {
       dispatch({ type: 'setUnauthenticated' });
       setError(toAuthErrorMessage('verifyEmail', error));
+      const errorCode = error instanceof AuthApiError ? (error.code ?? '') : '';
+      return { errorCode };
     } finally {
       dispatch({ type: 'setLoading', loadingAction: null });
     }

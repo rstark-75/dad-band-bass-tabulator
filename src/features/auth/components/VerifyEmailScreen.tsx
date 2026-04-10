@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -15,10 +15,16 @@ type Props = NativeStackScreenProps<RootStackParamList, 'VerifyEmail'>;
 export function VerifyEmailScreen({ route, navigation }: Props) {
   const { authState, errorMessage, infoMessage, loadingAction, verifyEmail, resendVerification, clearError, setAuthView } = useAuth();
   const [attempt, setAttempt] = useState(0);
+  const [verifyErrorCode, setVerifyErrorCode] = useState<string | null>(null);
   const [resendEmail, setResendEmail] = useState('');
   const [showResend, setShowResend] = useState(false);
+  // Tracks which token+attempt combination we've already dispatched to the API,
+  // preventing double-calls from Strict Mode double-invoke or deep link re-open.
+  const verifyCallKeyRef = useRef('');
+
   const resendEmailIsValid = isValidEmail(resendEmail.trim().toLowerCase());
   const isResending = loadingAction === 'resendVerification';
+
   const fallbackTokenFromUrl = useMemo(() => {
     if (
       typeof globalThis === 'undefined' ||
@@ -35,26 +41,36 @@ export function VerifyEmailScreen({ route, navigation }: Props) {
       return '';
     }
   }, []);
+
   const token = useMemo(() => {
     const routeToken = route.params?.token?.trim();
-
-    if (routeToken) {
-      return routeToken;
-    }
-
-    return fallbackTokenFromUrl;
+    return routeToken || fallbackTokenFromUrl;
   }, [fallbackTokenFromUrl, route.params?.token]);
+
   const isVerifying = loadingAction === 'verifyEmail';
   const isAuthenticated = authState.type === 'AUTHENTICATED';
+  const alreadyConsumed = verifyErrorCode === 'TOKEN_ALREADY_CONSUMED';
 
   useEffect(() => {
     clearError();
+    setVerifyErrorCode(null);
+    setShowResend(false);
 
     if (!token) {
       return;
     }
 
-    void verifyEmail(token);
+    const callKey = `${token}-${attempt}`;
+    if (verifyCallKeyRef.current === callKey) {
+      return;
+    }
+    verifyCallKeyRef.current = callKey;
+
+    void verifyEmail(token).then((result) => {
+      if (result?.errorCode) {
+        setVerifyErrorCode(result.errorCode);
+      }
+    });
   }, [attempt, clearError, token, verifyEmail]);
 
   useEffect(() => {
@@ -102,28 +118,41 @@ export function VerifyEmailScreen({ route, navigation }: Props) {
         {!isVerifying && !isAuthenticated && errorMessage ? (
           <View style={styles.actions}>
             <Text style={[styles.errorText, styles.centeredBody]}>{errorMessage}</Text>
-            <PrimaryButton
-              label="Try Again"
-              onPress={() => {
-                setAttempt((value) => value + 1);
-              }}
-            />
-            <PrimaryButton
-              variant="ghost"
-              label="Send me a new link"
-              onPress={() => {
-                clearError();
-                setShowResend(true);
-              }}
-            />
-            <PrimaryButton
-              variant="ghost"
-              label="Back to Sign In"
-              onPress={() => {
-                setAuthView('LOGIN');
-                navigation.replace('AuthEntry');
-              }}
-            />
+
+            {alreadyConsumed ? (
+              <PrimaryButton
+                label="Sign In"
+                onPress={() => {
+                  setAuthView('LOGIN');
+                  navigation.replace('AuthEntry');
+                }}
+              />
+            ) : (
+              <>
+                <PrimaryButton
+                  label="Try Again"
+                  onPress={() => {
+                    setAttempt((value) => value + 1);
+                  }}
+                />
+                <PrimaryButton
+                  variant="ghost"
+                  label="Send me a new link"
+                  onPress={() => {
+                    clearError();
+                    setShowResend(true);
+                  }}
+                />
+                <PrimaryButton
+                  variant="ghost"
+                  label="Back to Sign In"
+                  onPress={() => {
+                    setAuthView('LOGIN');
+                    navigation.replace('AuthEntry');
+                  }}
+                />
+              </>
+            )}
           </View>
         ) : null}
 

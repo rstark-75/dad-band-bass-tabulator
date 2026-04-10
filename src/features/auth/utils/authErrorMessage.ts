@@ -84,8 +84,12 @@ export const toAuthErrorMessage = (action: AuthAction, error: unknown): string =
   }
 
   if (action === 'verifyEmail') {
+    if (error.code === 'TOKEN_ALREADY_CONSUMED') {
+      return 'Your email is already verified. Please sign in.';
+    }
+
     if (error.code === 'INVALID_OR_EXPIRED_TOKEN' || error.status === 400 || error.status === 401) {
-      return 'This verification link is invalid or has expired.';
+      return 'This link has expired.';
     }
 
     if (error.code === 'RATE_LIMITED' || error.status === 429) {
