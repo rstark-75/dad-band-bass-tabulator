@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Text,
   TextStyle,
+  useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
@@ -32,6 +33,7 @@ interface TabPreviewContentProps {
   tone?: 'light' | 'dark';
   compact?: boolean;
   svgScaleProfile?: TabPreviewSvgScaleProfile;
+  svgViewportWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -328,6 +330,7 @@ const SVG_SCALE_PROFILES: Record<
     stringSpacing: number;
     minRowWidth: number;
     minRowHeight: number;
+    minSlotAdvance: number;
     fretFontSize: number;
     noteMargin: number;
     stemHeight: number;
@@ -352,6 +355,7 @@ const SVG_SCALE_PROFILES: Record<
     stringSpacing: 26,
     minRowWidth: 240,
     minRowHeight: 96,
+    minSlotAdvance: 14,
     fretFontSize: 16,
     noteMargin: 40,
     stemHeight: 30,
@@ -375,6 +379,7 @@ const SVG_SCALE_PROFILES: Record<
     stringSpacing: 34,
     minRowWidth: 320,
     minRowHeight: 128,
+    minSlotAdvance: 12,
     fretFontSize: 22,
     noteMargin: 52,
     stemHeight: 36,
@@ -401,14 +406,20 @@ function SvgTabPagePreview({
   tone = 'light',
   compact = false,
   svgScaleProfile = 'standard',
+  svgViewportWidth,
   style,
 }: TabPreviewContentProps) {
   const isDark = tone === 'dark';
+  const { width: windowWidth } = useWindowDimensions();
   const resolvedRowBarCounts = resolveRowBarCounts(bars, rowBarCounts, barsPerRow);
   let barCursor = 0;
   const svgScale = SVG_SCALE_PROFILES[svgScaleProfile];
 
-  const slotAdvance = svgScale.slotWidth + svgScale.slotGap;
+  const baseSlotAdvance = svgScale.slotWidth + svgScale.slotGap;
+  const fallbackViewportWidth = Math.max(320, windowWidth - 40);
+  const resolvedViewportWidth = svgViewportWidth && svgViewportWidth > 0
+    ? svgViewportWidth
+    : fallbackViewportWidth;
 
   return (
     <View style={[styles.preview, style]}>
@@ -429,10 +440,24 @@ function SvgTabPagePreview({
           return offsets;
         }, []);
         const totalSlotCount = rowBarSlotCounts.reduce((sum, slotCount) => sum + slotCount, 0);
+        const maxSvgWidth = Math.max(
+          160,
+          resolvedViewportWidth - svgScale.labelColumnWidth - svgScale.rowGap,
+        );
+        const fixedSvgWidth = SVG_ROW_PADDING * 2 + svgScale.noteMargin;
+        const availableGridWidth = Math.max(1, maxSvgWidth - fixedSvgWidth);
+        const slotAdvance =
+          totalSlotCount > 0
+            ? Math.min(
+              baseSlotAdvance,
+              Math.max(svgScale.minSlotAdvance, availableGridWidth / totalSlotCount),
+            )
+            : baseSlotAdvance;
         const gridWidth = Math.max(1, totalSlotCount) * slotAdvance;
+        const minRowWidth = Math.min(svgScale.minRowWidth, maxSvgWidth);
         const svgWidth = Math.max(
-          gridWidth + SVG_ROW_PADDING * 2 + svgScale.noteMargin,
-          svgScale.minRowWidth,
+          gridWidth + fixedSvgWidth,
+          minRowWidth,
         );
         const stringPositions =
           stringNames.length > 0

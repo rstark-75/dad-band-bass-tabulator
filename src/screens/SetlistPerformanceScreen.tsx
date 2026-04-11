@@ -175,6 +175,8 @@ export function SetlistPerformanceScreen({ route }: Props) {
   const canvasWidth = isPhone
     ? Math.max(620, availableCanvasWidth)
     : Math.min(Math.max(720, availableCanvasWidth), 980);
+  const canvasHorizontalPadding = isPhone ? 14 : 24;
+  const svgViewportWidth = Math.max(240, canvasWidth - canvasHorizontalPadding * 2);
 
   const handleRenderModeChange = (mode: TabPreviewRenderMode) => {
     if (mode === 'svg' && !capabilities.svgEnabled) {
@@ -327,6 +329,7 @@ export function SetlistPerformanceScreen({ route }: Props) {
                 compact={useCompactPreview}
                 renderMode={renderMode}
                 svgScaleProfile="performance"
+                svgViewportWidth={svgViewportWidth}
               />
             </View>
           </ScrollView>

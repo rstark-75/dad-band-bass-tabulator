@@ -28,6 +28,8 @@ export function LiveViewScreen({ route }: Props) {
   const canvasWidth = isPhone
     ? Math.max(620, availableCanvasWidth)
     : Math.min(Math.max(720, availableCanvasWidth), 980);
+  const canvasHorizontalPadding = isPhone ? 16 : 24;
+  const svgViewportWidth = Math.max(240, canvasWidth - canvasHorizontalPadding * 2);
   const song = songs.find((item) => item.id === songId);
   const chart = useMemo(
     () => (song ? flattenSongRowsToChart(song) : undefined),
@@ -50,9 +52,10 @@ export function LiveViewScreen({ route }: Props) {
         compact={useCompactPreview}
         renderMode={renderMode}
         svgScaleProfile="performance"
+        svgViewportWidth={svgViewportWidth}
       />
     );
-  }, [chart, renderMode, useCompactPreview]);
+  }, [chart, renderMode, svgViewportWidth, useCompactPreview]);
 
   const handleRenderModeChange = (mode: TabPreviewRenderMode) => {
     if (mode === 'svg' && !capabilities.svgEnabled) {
