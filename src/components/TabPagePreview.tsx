@@ -460,6 +460,7 @@ function SvgTabPagePreview({
               Math.max(svgScale.minSlotAdvance, availableGridWidth / totalSlotCount),
             )
             : baseSlotAdvance;
+        const effectiveSlotWidth = Math.min(svgScale.slotWidth, slotAdvance);
         const gridWidth = Math.max(1, totalSlotCount) * slotAdvance;
         const minRowWidth = Math.min(svgScale.minRowWidth, maxSvgWidth);
         const svgWidth = Math.max(
@@ -592,7 +593,7 @@ function SvgTabPagePreview({
                           svgScale.rowPadding +
                           (cumulativeBarOffsets[barIndex] ?? 0) * slotAdvance +
                           slotIndex * slotAdvance +
-                          svgScale.slotWidth / 2;
+                          effectiveSlotWidth / 2;
                         const fretY = stringPositions[stringIndex];
                         const noteStyle = isTimedNote
                           ? getNoteRenderStyle({
