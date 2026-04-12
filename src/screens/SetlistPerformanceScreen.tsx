@@ -83,7 +83,7 @@ export function SetlistPerformanceScreen({ route }: Props) {
   const { width } = useWindowDimensions();
   const { songs, setlists, activeSetlistId } = useBassTab();
   const [renderMode, setRenderMode] = useState<TabPreviewRenderMode>('ascii');
-  const [tone, setTone] = useState<PerformanceTone>('dark');
+  const [tone, setTone] = useState<PerformanceTone>('light');
   const hasAutoSelectedSvgModeRef = useRef(false);
   const [songIndex, setSongIndex] = useState(0);
   const [pageIndex, setPageIndex] = useState(0);

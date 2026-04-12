@@ -41,6 +41,18 @@ function DadBandBadge() {
 // ---------------------------------------------------------------------------
 type CancelState = 'idle' | 'confirming' | 'submitting' | 'error';
 
+const isCancellationApplied = (snapshot: {
+  tier: 'FREE' | 'PRO';
+  status: 'active' | 'cancellation_scheduled' | 'cancelled' | 'expired' | 'free' | 'incomplete';
+  cancelAtPeriodEnd: boolean;
+}): boolean =>
+  snapshot.cancelAtPeriodEnd ||
+  snapshot.status === 'cancellation_scheduled' ||
+  snapshot.status === 'cancelled' ||
+  snapshot.status === 'expired' ||
+  snapshot.status === 'free' ||
+  snapshot.tier === 'FREE';
+
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
@@ -201,9 +213,16 @@ export function AccountScreen({ navigation }: Props) {
       setCancelState('idle');
     } catch (error) {
       if (error instanceof BassTabApiError && error.status === 409) {
-        await refresh();
-        setCancelState('idle');
-        return;
+        try {
+          const latestSnapshot = await subscriptionService.loadSnapshot();
+          if (isCancellationApplied(latestSnapshot)) {
+            await refresh();
+            setCancelState('idle');
+            return;
+          }
+        } catch (_refreshError) {
+          // Fall through to existing error handling.
+        }
       }
       if (error instanceof BassTabApiError && error.status === 404) {
         await refresh();
@@ -211,6 +230,18 @@ export function AccountScreen({ navigation }: Props) {
         setCancelState('error');
         return;
       }
+
+      try {
+        const latestSnapshot = await subscriptionService.loadSnapshot();
+        if (isCancellationApplied(latestSnapshot)) {
+          await refresh();
+          setCancelState('idle');
+          return;
+        }
+      } catch (_refreshError) {
+        // Fall through to generic error message.
+      }
+
       setCancelError("Couldn't cancel subscription right now. Please try again.");
       setCancelState('error');
     }

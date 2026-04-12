@@ -310,6 +310,7 @@ const SVG_BAR_STROKE = 1.4;
 const SVG_HOLD4_RADIUS = 12;
 const SVG_HOLD2_RADIUS = 9;
 const SVG_CIRCLE_OFFSET = 5;
+const SVG_CIRCLE_Y_NUDGE = 3;
 const SVG_FLAG_WIDTH = 10;
 const SVG_FLAG_HEIGHT = 8;
 const SVG_STEM_X_OFFSET = 5;
@@ -607,7 +608,7 @@ function SvgTabPagePreview({
                         const stemTop = shortBeatStemBaseY - svgScale.stemHeight;
                         const circleCenterY =
                           noteStyle === 'hold4' || noteStyle === 'hold2'
-                            ? fretY - SVG_CIRCLE_OFFSET
+                            ? fretY - SVG_CIRCLE_OFFSET + SVG_CIRCLE_Y_NUDGE
                             : fretY;
                         const circleRadius =
                           noteStyle === 'hold4'

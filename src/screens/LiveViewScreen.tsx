@@ -20,7 +20,7 @@ export function LiveViewScreen({ route }: Props) {
   const { showUpgradePrompt } = useUpgradePrompt();
   const { songs } = useBassTab();
   const [renderMode, setRenderMode] = useState<TabPreviewRenderMode>('ascii');
-  const [tone, setTone] = useState<PerformanceTone>('dark');
+  const [tone, setTone] = useState<PerformanceTone>('light');
   const hasAutoSelectedSvgModeRef = useRef(false);
   const { width } = useWindowDimensions();
   const isPhone = width < 760;
