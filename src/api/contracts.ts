@@ -199,6 +199,20 @@ export interface SaveCommunitySongRequestDto {
   communitySongId: string;
 }
 
+export type DeleteSongWithPolicyIntentDto = 'removeFromCommunity' | 'orphanIfLiked';
+
+export interface DeleteSongWithPolicyRequestDto {
+  intent: DeleteSongWithPolicyIntentDto;
+}
+
+export type DeleteSongWithPolicyCommunityActionDto = 'UNLISTED' | 'DISOWNED' | 'NONE';
+
+export interface DeleteSongWithPolicyResponseDto {
+  songId: string;
+  publishedSongId: string | null;
+  communityAction: DeleteSongWithPolicyCommunityActionDto;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -987,6 +1001,33 @@ export const parseCommunitySavedSongsDto = (value: unknown): CommunitySavedSongD
 
 export const parseCommunitySongVotesDto = (value: unknown): CommunitySongVotesDto => {
   return toCommunitySongVotesDto(value);
+};
+
+export const parseDeleteSongWithPolicyResponseDto = (value: unknown): DeleteSongWithPolicyResponseDto => {
+  if (!isRecord(value) || typeof value.songId !== 'string') {
+    throw new Error('Invalid delete-with-policy response payload.');
+  }
+
+  const publishedSongId =
+    typeof value.publishedSongId === 'string'
+      ? value.publishedSongId
+      : value.publishedSongId === null
+        ? null
+        : null;
+  const communityActionRaw =
+    typeof value.communityAction === 'string'
+      ? value.communityAction
+      : 'NONE';
+  const communityAction =
+    communityActionRaw === 'UNLISTED' || communityActionRaw === 'DISOWNED' || communityActionRaw === 'NONE'
+      ? communityActionRaw
+      : 'NONE';
+
+  return {
+    songId: value.songId,
+    publishedSongId,
+    communityAction,
+  };
 };
 
 // ---------------------------------------------------------------------------

@@ -86,7 +86,7 @@ interface BassTabContextValue {
   renameSetlist: (setlistId: string, name: string) => void;
   deleteSetlist: (setlistId: string) => void;
   setActiveSetlist: (setlistId: string) => void;
-  deleteSong: (songId: string) => void;
+  deleteSong: (songId: string, backendSongId?: string, options?: { skipBackendDelete?: boolean }) => void;
   updateSong: (songId: string, updates: Partial<Song>) => void;
   updateSongChart: (
     songId: string,
@@ -350,6 +350,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
   const [activeSetlistId, setActiveSetlistId] = useState(initialDefaultSetlist.id);
   const [hasHydrated, setHasHydrated] = useState(false);
   const hydratedBackendSessionKeyRef = useRef<string | null>(null);
+  const backendHydrateTokenRef = useRef(0);
   const { authState } = useAuth();
   const { tier, capabilities, capabilityDefaults } = useSubscription();
   const fallbackFreeCapabilities = capabilityDefaults?.free ?? {
@@ -386,6 +387,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       throw new Error('BassTab backend is not configured.');
     }
 
+    const hydrateToken = ++backendHydrateTokenRef.current;
     logClientEvent('info', 'basstab.hydrate_backend_start');
 
     const [songsMetadata, playlistDto] = await Promise.all([
@@ -396,6 +398,10 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     const knownSongIds = new Set(metadataSongs.map((song) => song.id));
     const playlist = fromPlaylistDto(playlistDto);
     const normalizedPlaylist = normalizeSetlist(sanitizeSetlistSongIds(playlist, knownSongIds));
+
+    if (hydrateToken !== backendHydrateTokenRef.current) {
+      return;
+    }
 
     // Apply metadata immediately so Library can render even if chart-detail calls fail or time out.
     setSongs(metadataSongs);
@@ -432,6 +438,11 @@ export function BassTabProvider({ children }: PropsWithChildren) {
 
     const nextSongs = songsMetadata.map((songMetadata) =>
       detailSongById.get(songMetadata.id) ?? toSongFromMetadata(songMetadata));
+
+    if (hydrateToken !== backendHydrateTokenRef.current) {
+      return;
+    }
+
     setSongs(nextSongs);
 
     if (failedSongIds.length > 0) {
@@ -733,8 +744,13 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const deleteSong = (songId: string) => {
+  const deleteSong = (
+    songId: string,
+    backendSongId?: string,
+    options?: { skipBackendDelete?: boolean },
+  ) => {
     let nextActiveSongIds: string[] = [];
+    backendHydrateTokenRef.current += 1;
 
     setSongs((current) => current.filter((song) => song.id !== songId));
     setSetlists((current) =>
@@ -753,15 +769,16 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       }),
     );
 
-    if (!backendApi) {
+    if (!backendApi || options?.skipBackendDelete) {
       return;
     }
 
     void (async () => {
+      const targetBackendSongId = backendSongId ?? songId;
       try {
-        await backendApi.deleteSong(songId);
+        await backendApi.deleteSong(targetBackendSongId);
       } catch (error) {
-        console.warn('BassTab backend deleteSong failed', error);
+        console.warn('BassTab backend deleteSong failed', { songId, backendSongId: targetBackendSongId, error });
       }
       try {
         await backendApi.replacePlaylistOrder({ songIds: nextActiveSongIds });

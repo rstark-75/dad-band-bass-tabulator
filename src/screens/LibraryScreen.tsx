@@ -5,7 +5,7 @@ import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import { createBassTabApiFromEnv } from '../api';
+import { BassTabApiError, createBassTabApiFromEnv } from '../api';
 import { EmptyState } from '../components/EmptyState';
 import { AppSectionNav } from '../components/AppSectionNav';
 import { LibrarySongCard } from '../components/LibrarySongCard';
@@ -73,6 +73,7 @@ type Props = CompositeScreenProps<
 type SongPendingDelete = {
   id: string;
   title: string;
+  backendSongId?: string | null;
   communityAction: 'LOCAL_ONLY' | 'ORPHAN_THEN_DELETE' | 'REMOVE_FROM_COMMUNITY_THEN_DELETE';
   publishedSongId?: string | null;
   upVotes?: number;
@@ -150,29 +151,45 @@ export function LibraryScreen({ navigation }: Props) {
   };
 
   const handleDeleteSong = async (songId: string, songTitle: string) => {
+    const cachedPublishedInfo = publishedLookup[songId];
     let nextPendingDelete: SongPendingDelete = {
       id: songId,
       title: songTitle,
+      backendSongId: songId,
       communityAction: 'LOCAL_ONLY',
+      publishedSongId: cachedPublishedInfo?.publishedSongId ?? null,
     };
+
+    if (tier === 'FREE') {
+      setSongPendingDelete(nextPendingDelete);
+      return;
+    }
 
     if (backendApi) {
       try {
         const communitySongs = await backendApi.listCommunitySongs();
         const communityEntry = communitySongs.find((entry) => {
-          const sourceSongId = entry.sourceSongId ?? entry.id ?? null;
-          const publishedSongId = entry.publishedSongId ?? entry.id ?? null;
+          const sourceSongId = entry.sourceSongId ?? null;
+          const publishedSongId =
+            entry.publishedSongId ??
+            (entry.id && entry.id !== sourceSongId ? entry.id : null);
           return sourceSongId === songId && Boolean(publishedSongId);
         });
 
         if (communityEntry) {
           const upVotes = Math.max(0, communityEntry.votes?.upVotes ?? 0);
-          const publishedSongId = communityEntry.publishedSongId ?? communityEntry.id;
+          const sourceSongId = communityEntry.sourceSongId ?? songId;
+          const publishedSongId =
+            communityEntry.publishedSongId ??
+            (communityEntry.id && communityEntry.id !== sourceSongId ? communityEntry.id : null) ??
+            cachedPublishedInfo?.publishedSongId ??
+            null;
           const shouldOrphan = upVotes > 0;
 
           nextPendingDelete = {
             id: songId,
             title: songTitle,
+            backendSongId: sourceSongId,
             communityAction: shouldOrphan
               ? 'ORPHAN_THEN_DELETE'
               : 'REMOVE_FROM_COMMUNITY_THEN_DELETE',
@@ -245,10 +262,24 @@ export function LibraryScreen({ navigation }: Props) {
     setPublishingSongId(song.id);
 
     try {
-      await backendApi.publishSong(song.id);
+      const publishedSongId = publishedLookup[song.id]?.publishedSongId;
+
+      if (!publishedSongId) {
+        setStatusMessage('Could not republish: missing published community id.');
+        return;
+      }
+
+      await backendApi.republishCommunitySong(publishedSongId);
       await refreshPublishedLookup();
       setStatusMessage(`"${song.title}" republished to Community.`);
     } catch (error) {
+      const trigger = resolveUpgradeTrigger(error);
+
+      if (trigger) {
+        showUpgradePrompt(trigger);
+        return;
+      }
+
       const message =
         error instanceof Error ? error.message : 'Could not republish this song to community.';
       setStatusMessage(message);
@@ -257,34 +288,69 @@ export function LibraryScreen({ navigation }: Props) {
     }
   };
 
-  const confirmDeleteSong = async () => {
+  const confirmDeleteSong = async (
+    forcedCommunityAction?: SongPendingDelete['communityAction'],
+  ) => {
     if (!songPendingDelete) {
       return;
     }
 
-    const pendingDelete = songPendingDelete;
+    const nextAction =
+      tier === 'PRO'
+        ? (forcedCommunityAction ?? songPendingDelete.communityAction)
+        : 'LOCAL_ONLY';
+    const pendingDelete: SongPendingDelete = {
+      ...songPendingDelete,
+      communityAction: nextAction,
+    };
     setSongPendingDelete(null);
 
-    if (backendApi && pendingDelete.publishedSongId) {
+    const isPolicyDelete =
+      tier === 'PRO' &&
+      Boolean(backendApi) &&
+      Boolean(pendingDelete.publishedSongId) &&
+      pendingDelete.communityAction !== 'LOCAL_ONLY';
+
+    if (isPolicyDelete && backendApi) {
       try {
-        if (pendingDelete.communityAction === 'ORPHAN_THEN_DELETE') {
-          await backendApi.disownCommunitySong(pendingDelete.publishedSongId);
-        } else if (pendingDelete.communityAction === 'REMOVE_FROM_COMMUNITY_THEN_DELETE') {
-          await backendApi.unlistPublishedSong(pendingDelete.publishedSongId);
-        }
+        await backendApi.deleteSongWithPolicy(
+          pendingDelete.backendSongId ?? pendingDelete.id,
+          pendingDelete.communityAction === 'ORPHAN_THEN_DELETE'
+            ? 'orphanIfLiked'
+            : 'removeFromCommunity',
+        );
       } catch (error) {
-        const message =
-          error instanceof Error
+        const trigger = resolveUpgradeTrigger(error);
+
+        if (trigger) {
+          showUpgradePrompt(trigger);
+          return;
+        }
+
+        if (
+          error instanceof BassTabApiError &&
+          error.status === 404 &&
+          /community song not found/i.test(error.message)
+        ) {
+          console.warn('Community song already missing during delete flow', {
+            pendingDelete,
+            message: error.message,
+          });
+        } else {
+          const message = error instanceof Error
             ? error.message
-            : pendingDelete.communityAction === 'ORPHAN_THEN_DELETE'
-              ? 'Could not orphan Community version before deleting.'
-              : 'Could not remove Community version before deleting.';
-        setStatusMessage(message);
-        return;
+            : 'Could not delete song with community policy.';
+          setStatusMessage(message);
+          return;
+        }
       }
     }
 
-    deleteSong(pendingDelete.id);
+    deleteSong(
+      pendingDelete.id,
+      pendingDelete.backendSongId ?? pendingDelete.id,
+      { skipBackendDelete: isPolicyDelete },
+    );
     void refreshPublishedLookup().catch((error) => {
       console.warn('Failed to refresh published lookup after delete', error);
     });
@@ -411,7 +477,7 @@ export function LibraryScreen({ navigation }: Props) {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Bin song?</Text>
-            <Text style={styles.modalText}>
+                <Text style={styles.modalText}>
               {songPendingDelete
                 ? songPendingDelete.communityAction === 'ORPHAN_THEN_DELETE'
                   ? `"${songPendingDelete.title}" has ${songPendingDelete.upVotes ?? 0} like${(songPendingDelete.upVotes ?? 0) === 1 ? '' : 's'} in Community. It can't be deleted there.`
@@ -423,12 +489,28 @@ export function LibraryScreen({ navigation }: Props) {
             {songPendingDelete?.communityAction === 'ORPHAN_THEN_DELETE' ? (
               <Text style={styles.modalText}>We can orphan it in Community and delete it locally.</Text>
             ) : null}
+            {songPendingDelete?.communityAction === 'REMOVE_FROM_COMMUNITY_THEN_DELETE' &&
+            tier === 'PRO' ? (
+              <Text style={styles.modalText}>
+                Pro option: orphan it in Community and still bin it from your library.
+              </Text>
+            ) : null}
             <View style={styles.modalActions}>
               <PrimaryButton
                 label="Cancel"
                 onPress={() => setSongPendingDelete(null)}
                 variant="ghost"
               />
+              {songPendingDelete?.communityAction === 'REMOVE_FROM_COMMUNITY_THEN_DELETE' &&
+              tier === 'PRO' ? (
+                <PrimaryButton
+                  label="Orphan + Bin"
+                  onPress={() => {
+                    void confirmDeleteSong('ORPHAN_THEN_DELETE');
+                  }}
+                  variant="secondary"
+                />
+              ) : null}
               <PrimaryButton
                 label={
                   songPendingDelete?.communityAction === 'ORPHAN_THEN_DELETE'

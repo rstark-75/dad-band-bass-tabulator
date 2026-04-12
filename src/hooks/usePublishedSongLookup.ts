@@ -35,8 +35,10 @@ export function usePublishedSongLookup(backendApi?: BassTabApi | null) {
     try {
       const publishedSongs = await api.listCommunitySongs();
       const nextLookup = publishedSongs.reduce<Record<string, PublishedSongInfo>>((acc, entry) => {
-        const sourceSongId = entry.sourceSongId ?? entry.id ?? null;
-        const publishedSongId = entry.publishedSongId ?? entry.id ?? null;
+        const sourceSongId = entry.sourceSongId ?? null;
+        const publishedSongId =
+          entry.publishedSongId ??
+          (entry.id && entry.id !== sourceSongId ? entry.id : null);
 
         if (sourceSongId && publishedSongId) {
           const upVotes = Math.max(0, entry.votes?.upVotes ?? 0);

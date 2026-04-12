@@ -16,6 +16,7 @@ import {
   parseCommunitySongDetailDto,
   parseCommunitySavedSongsDto,
   parseCommunitySongVotesDto,
+  parseDeleteSongWithPolicyResponseDto,
   parseSongMetadataListDto,
   parseSongDto,
   parseSongMetadataDto,
@@ -28,6 +29,8 @@ import {
   parseSubscriptionUpgradeResponseDto,
   PlaylistDto,
   SaveCommunitySongRequestDto,
+  DeleteSongWithPolicyIntentDto,
+  DeleteSongWithPolicyResponseDto,
   SubscriptionCapabilityDefaultsDto,
   SubscriptionCancelResponseDto,
   SubscriptionPricingDto,
@@ -51,9 +54,14 @@ export interface BassTabApi {
   aiGenerateSong(payload: AiGenerateSongRequestDto): Promise<SongDto>;
   updateSongMetadata(songId: string, payload: UpdateSongMetadataRequestDto): Promise<SongMetadataDto>;
   publishSong(songId: string): Promise<void>;
+  republishCommunitySong(publishedSongId: string): Promise<void>;
   unlistPublishedSong(publishedSongId: string): Promise<void>;
   replaceSongChart(songId: string, payload: ReplaceSongChartRequestDto): Promise<SongChartDto>;
   deleteSong(songId: string): Promise<void>;
+  deleteSongWithPolicy(
+    songId: string,
+    intent: DeleteSongWithPolicyIntentDto,
+  ): Promise<DeleteSongWithPolicyResponseDto>;
   getPlaylist(): Promise<PlaylistDto>;
   replacePlaylistOrder(payload: ReplacePlaylistOrderRequestDto): Promise<PlaylistDto>;
   getSubscription(): Promise<SubscriptionSnapshotDto>;
@@ -239,6 +247,18 @@ export class HttpBassTabApi implements BassTabApi {
     );
   }
 
+  async republishCommunitySong(publishedSongId: string): Promise<void> {
+    await this.request(
+      `/v1/community/${encodeURIComponent(publishedSongId)}/republish`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({}),
+      },
+      () => undefined,
+    );
+  }
+
   async unlistPublishedSong(publishedSongId: string): Promise<void> {
     await this.request(
       `/v1/community/${encodeURIComponent(publishedSongId)}/unlist`,
@@ -265,6 +285,21 @@ export class HttpBassTabApi implements BassTabApi {
 
   async deleteSong(songId: string): Promise<void> {
     await this.request(`/v1/songs/${encodeURIComponent(songId)}`, { method: 'DELETE' }, () => undefined);
+  }
+
+  async deleteSongWithPolicy(
+    songId: string,
+    intent: DeleteSongWithPolicyIntentDto,
+  ): Promise<DeleteSongWithPolicyResponseDto> {
+    return this.request(
+      `/v1/songs/${encodeURIComponent(songId)}/delete-with-policy`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ intent }),
+      },
+      parseDeleteSongWithPolicyResponseDto,
+    );
   }
 
   async getPlaylist(): Promise<PlaylistDto> {

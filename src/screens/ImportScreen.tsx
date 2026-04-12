@@ -21,7 +21,7 @@ import { AppSectionNav } from '../components/AppSectionNav';
 import { EmptyState } from '../components/EmptyState';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { TabPagePreview } from '../components/TabPagePreview';
+import { TabPagePreview, TabPreviewRenderMode } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
 import {
@@ -44,6 +44,8 @@ type Props = CompositeScreenProps<
 >;
 
 type CommunitySongListItem = CommunitySongCard;
+const FREE_PREVIEW_ROW_LIMIT = 2;
+const DEFAULT_BARS_PER_ROW = 4;
 
 interface CommunityPreviewData {
   title: string;
@@ -56,6 +58,42 @@ interface CommunityPreviewData {
   bars: ReturnType<typeof parseTab>['bars'];
   rowAnnotations: SongChart['rowAnnotations'];
   rowBarCounts: number[];
+}
+
+function resolvePreviewRowCounts(rowBarCounts: number[] | undefined, totalBars: number): number[] {
+  if (rowBarCounts && rowBarCounts.length > 0) {
+    return rowBarCounts.filter((count) => count > 0);
+  }
+
+  return Array.from(
+    { length: Math.max(1, Math.ceil(totalBars / DEFAULT_BARS_PER_ROW)) },
+    () => DEFAULT_BARS_PER_ROW,
+  );
+}
+
+function getFreePreviewData(previewData: CommunityPreviewData): {
+  data: CommunityPreviewData;
+  isTruncated: boolean;
+} {
+  const resolvedCounts = resolvePreviewRowCounts(previewData.rowBarCounts, previewData.bars.length);
+  const isTruncated = resolvedCounts.length > FREE_PREVIEW_ROW_LIMIT;
+
+  if (!isTruncated) {
+    return { data: previewData, isTruncated: false };
+  }
+
+  const limitedCounts = resolvedCounts.slice(0, FREE_PREVIEW_ROW_LIMIT);
+  const shownBarCount = limitedCounts.reduce((sum, count) => sum + count, 0);
+
+  return {
+    data: {
+      ...previewData,
+      bars: previewData.bars.slice(0, shownBarCount),
+      rowAnnotations: previewData.rowAnnotations.slice(0, limitedCounts.length),
+      rowBarCounts: limitedCounts,
+    },
+    isTruncated: true,
+  };
 }
 
 function resolveCommunitySaveId(song: CommunitySongCard) {
@@ -263,6 +301,9 @@ export function ImportScreen({ navigation }: Props) {
   const [votingSongId, setVotingSongId] = useState<string | null>(null);
   const [voteBlockedSongTitle, setVoteBlockedSongTitle] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<CommunityPreviewData | null>(null);
+  const [previewRenderMode, setPreviewRenderMode] = useState<TabPreviewRenderMode>(
+    capabilities.svgEnabled ? 'svg' : 'ascii',
+  );
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [statusMessage, setStatusMessage] = useState('Browse community charts and save the ones you want to play.');
   const [ownershipFilter, setOwnershipFilter] = useState<'ALL' | 'MINE' | 'UNCLAIMED'>('ALL');
@@ -379,6 +420,7 @@ export function ImportScreen({ navigation }: Props) {
         rowAnnotations: flattened.rowAnnotations,
         rowBarCounts: flattened.rowBarCounts,
       });
+      setPreviewRenderMode(capabilities.svgEnabled ? 'svg' : 'ascii');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load preview.';
       setStatusMessage(message);
@@ -682,6 +724,15 @@ export function ImportScreen({ navigation }: Props) {
     }
   };
 
+  const handlePreviewRenderModeChange = (mode: TabPreviewRenderMode) => {
+    if (mode === 'svg' && !capabilities.svgEnabled) {
+      showUpgradePrompt('SVG_MODE');
+      return;
+    }
+
+    setPreviewRenderMode(mode);
+  };
+
   return (
     <ScreenContainer>
       <View style={styles.navRow}>
@@ -900,17 +951,44 @@ export function ImportScreen({ navigation }: Props) {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.previewModalCard}>
-            {previewData ? (
-              <>
+            {previewData ? (() => {
+              const { data: displayPreviewData, isTruncated } =
+                tier === 'PRO' ? { data: previewData, isTruncated: false } : getFreePreviewData(previewData);
+
+              return (
+                <>
                 <View style={styles.previewHeader}>
-              <Text style={styles.previewTitle}>{previewData.title}</Text>
+              <View style={styles.previewTitleRow}>
+                <Text style={styles.previewTitle}>{displayPreviewData.title}</Text>
+                <View style={styles.previewRenderModeSelector}>
+                  {(['ascii', 'svg'] as TabPreviewRenderMode[]).map((mode) => (
+                    <Pressable
+                      key={mode}
+                      onPress={() => handlePreviewRenderModeChange(mode)}
+                      style={[
+                        styles.previewRenderModeOption,
+                        previewRenderMode === mode && styles.previewRenderModeOptionActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.previewRenderModeOptionText,
+                          previewRenderMode === mode && styles.previewRenderModeOptionTextActive,
+                        ]}
+                      >
+                        {mode === 'svg' && !capabilities.svgEnabled ? 'SVG PRO' : mode.toUpperCase()}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
               <Text style={styles.previewMeta}>
-                {previewData.artist} • {previewData.key} • {previewData.tuning}
+                {displayPreviewData.artist} • {displayPreviewData.key} • {displayPreviewData.tuning}
               </Text>
-              {previewData.authorComment?.trim() ? (
-                <Text style={styles.previewComment}>{previewData.authorComment.trim()}</Text>
+              {displayPreviewData.authorComment?.trim() ? (
+                <Text style={styles.previewComment}>{displayPreviewData.authorComment.trim()}</Text>
               ) : null}
-              <AuthorChip author={previewData.author} fallbackName={previewData.artist} />
+              <AuthorChip author={displayPreviewData.author} fallbackName={displayPreviewData.artist} />
             </View>
 
                 <ScrollView
@@ -919,13 +997,18 @@ export function ImportScreen({ navigation }: Props) {
                   showsVerticalScrollIndicator={false}
                 >
                   <TabPagePreview
-                    stringNames={previewData.stringNames}
-                    bars={previewData.bars}
-                    rowAnnotations={previewData.rowAnnotations}
-                    rowBarCounts={previewData.rowBarCounts}
-                    renderMode="ascii"
+                    stringNames={displayPreviewData.stringNames}
+                    bars={displayPreviewData.bars}
+                    rowAnnotations={displayPreviewData.rowAnnotations}
+                    rowBarCounts={displayPreviewData.rowBarCounts}
+                    renderMode={previewRenderMode}
                     compact
                   />
+                  {tier !== 'PRO' && isTruncated ? (
+                    <Text style={styles.previewUpsellNote}>
+                      Showing first 2 rows only. Go Pro for full chart preview.
+                    </Text>
+                  ) : null}
                 </ScrollView>
 
                 <View style={styles.previewActions}>
@@ -937,7 +1020,8 @@ export function ImportScreen({ navigation }: Props) {
                   />
                 </View>
               </>
-            ) : null}
+              );
+            })() : null}
           </View>
         </View>
       </Modal>
@@ -1144,10 +1228,40 @@ const styles = StyleSheet.create({
   previewHeader: {
     gap: 4,
   },
+  previewTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   previewTitle: {
     fontSize: 20,
     fontWeight: '800',
     color: palette.text,
+    flex: 1,
+  },
+  previewRenderModeSelector: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: palette.border,
+    overflow: 'hidden',
+  },
+  previewRenderModeOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: palette.surfaceMuted,
+  },
+  previewRenderModeOptionActive: {
+    backgroundColor: palette.primary,
+  },
+  previewRenderModeOptionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  previewRenderModeOptionTextActive: {
+    color: '#f8fafc',
   },
   previewMeta: {
     fontSize: 13,
@@ -1168,6 +1282,13 @@ const styles = StyleSheet.create({
   previewActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+  },
+  previewUpsellNote: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: palette.textMuted,
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,
