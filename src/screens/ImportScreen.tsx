@@ -1106,7 +1106,6 @@ const styles = StyleSheet.create({
   planText: {
     fontSize: 12,
     color: palette.textMuted,
-    flex: 1,
   },
   planLink: {
     fontSize: 12,
