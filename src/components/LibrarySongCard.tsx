@@ -11,6 +11,9 @@ interface LibrarySongCardProps {
   onEdit: () => void;
   onLive: () => void;
   onDelete: () => void;
+  onExportPdf?: () => void;
+  onLockedPdfExport?: () => void;
+  isPdfExportLocked?: boolean;
   isPublishedToCommunity?: boolean;
   isOrphanedInCommunity?: boolean;
   onToggleCommunityRelease?: () => void;
@@ -28,6 +31,9 @@ export function LibrarySongCard({
   onEdit,
   onLive,
   onDelete,
+  onExportPdf,
+  onLockedPdfExport,
+  isPdfExportLocked = false,
   isPublishedToCommunity = false,
   isOrphanedInCommunity = false,
   onToggleCommunityRelease,
@@ -45,6 +51,15 @@ export function LibrarySongCard({
     }
 
     onToggleCommunityRelease?.();
+  };
+
+  const handlePdfExportPress = () => {
+    if (isPdfExportLocked) {
+      onLockedPdfExport?.();
+      return;
+    }
+
+    onExportPdf?.();
   };
 
   return (
@@ -110,6 +125,14 @@ export function LibrarySongCard({
               variant="ghost"
               disabled={isCommunityReleaseUpdating}
               style={isCommunityActionLocked ? styles.lockedAction : undefined}
+            />
+          ) : null}
+          {onExportPdf || onLockedPdfExport ? (
+            <PrimaryButton
+              label="Export PDF"
+              onPress={handlePdfExportPress}
+              variant="ghost"
+              style={isPdfExportLocked ? styles.lockedAction : undefined}
             />
           ) : null}
           <PrimaryButton label="Bin it" onPress={onDelete} variant="danger" />

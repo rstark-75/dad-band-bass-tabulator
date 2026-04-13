@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createBassTabApiFromEnv } from '../api';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { TabPagePreview } from '../components/TabPagePreview';
+import { TabPagePreview, TabPreviewRenderMode } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
 import { brandDisplayFontFamily } from '../constants/typography';
 import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../features/subscription';
@@ -55,14 +55,23 @@ const printCss = `
 
 export function SongExportScreen({ navigation, route }: Props) {
   const { songId } = route.params;
-  const { tier } = useSubscription();
+  const { tier, capabilities } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
   const { songs } = useBassTab();
   const song = songs.find((item) => item.id === songId);
   const [isCheckingPdfAccess, setIsCheckingPdfAccess] = useState(Boolean(backendApi));
   const [isPdfLocked, setIsPdfLocked] = useState(tier === 'FREE');
+  const [renderMode, setRenderMode] = useState<TabPreviewRenderMode>(
+    capabilities.svgEnabled ? 'svg' : 'ascii',
+  );
   useWebPrintStyles('song-export-print-styles', printCss);
+
+  useEffect(() => {
+    if (!capabilities.svgEnabled && renderMode === 'svg') {
+      setRenderMode('ascii');
+    }
+  }, [capabilities.svgEnabled, renderMode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -135,6 +144,14 @@ export function SongExportScreen({ navigation, route }: Props) {
   const { stringNames, bars } = parseTab(chart.tab);
   const stringCount = stringNames.length;
   const teaserTab = chart.tab.split('\n').slice(0, 4).join('\n');
+  const handleRenderModeChange = (mode: TabPreviewRenderMode) => {
+    if (mode === 'svg' && !capabilities.svgEnabled) {
+      showUpgradePrompt('SVG_MODE');
+      return;
+    }
+
+    setRenderMode(mode);
+  };
 
   if (isCheckingPdfAccess) {
     return (
@@ -213,6 +230,27 @@ export function SongExportScreen({ navigation, route }: Props) {
             <Text style={styles.toolbarSubtitle}>
               No signal at the gig? Save this chart as a PDF and keep it on your device.
             </Text>
+            <View style={styles.renderModeSelector}>
+              {(['ascii', 'svg'] as TabPreviewRenderMode[]).map((mode) => (
+                <Pressable
+                  key={mode}
+                  onPress={() => handleRenderModeChange(mode)}
+                  style={[
+                    styles.renderModeOption,
+                    renderMode === mode && styles.renderModeOptionActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.renderModeOptionText,
+                      renderMode === mode && styles.renderModeOptionTextActive,
+                    ]}
+                  >
+                    {mode === 'svg' && !capabilities.svgEnabled ? 'SVG PRO' : mode.toUpperCase()}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
 
           {Platform.OS === 'web' ? (
@@ -232,14 +270,10 @@ export function SongExportScreen({ navigation, route }: Props) {
         <View nativeID="song-export-print-root" style={styles.pageSheet}>
           <View style={styles.pageHeader}>
             <View style={styles.pageTitleBlock}>
-              <Text style={styles.songTitle}>{song.title}</Text>
-              <Text style={styles.songSubtitle}>{song.artist}</Text>
-            </View>
-
-            <View style={styles.metaGrid}>
-              <MetaPill label="Key" value={song.key} />
-              <MetaPill label="Tuning" value={song.tuning} />
-              <MetaPill label="Strings" value={`${stringCount}`} />
+              <View style={styles.songTitleRow}>
+                <Text style={styles.songTitle}>{song.title}</Text>
+                <Text style={styles.songInlineMeta}>{song.artist} • {song.key} • {song.tuning}</Text>
+              </View>
             </View>
           </View>
 
@@ -251,20 +285,15 @@ export function SongExportScreen({ navigation, route }: Props) {
               rowBarCounts={chart.rowBarCounts}
               tone="light"
               compact
+              renderMode={renderMode}
+              svgScaleProfile="standard"
             />
           </View>
+
+          <Text style={styles.exportCredit}>created by Dad Band Bass - www.domainhere</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function MetaPill({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metaPill}>
-      <Text style={styles.metaLabel}>{label}</Text>
-      <Text style={styles.metaValue}>{value}</Text>
-    </View>
   );
 }
 
@@ -294,6 +323,31 @@ const styles = StyleSheet.create({
   toolbarCopy: {
     flex: 1,
     gap: 4,
+  },
+  renderModeSelector: {
+    marginTop: 6,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  renderModeOption: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#94a3b8',
+    backgroundColor: '#f8fafc',
+  },
+  renderModeOptionActive: {
+    borderColor: '#1d4ed8',
+    backgroundColor: '#dbeafe',
+  },
+  renderModeOptionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  renderModeOptionTextActive: {
+    color: '#1e3a8a',
   },
   toolbarTitle: {
     fontSize: 22,
@@ -341,43 +395,31 @@ const styles = StyleSheet.create({
   pageTitleBlock: {
     gap: 4,
   },
+  songTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   songTitle: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '800',
     fontFamily: brandDisplayFontFamily,
     letterSpacing: 0.2,
     color: '#111827',
   },
-  songSubtitle: {
-    fontSize: 16,
+  songInlineMeta: {
+    fontSize: 14,
     color: '#4b5563',
-  },
-  metaGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  metaPill: {
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#f5f5f4',
-    gap: 2,
-  },
-  metaLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#78716c',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  metaValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1f2937',
   },
   chartBody: {
     gap: 12,
+  },
+  exportCredit: {
+    marginTop: 4,
+    textAlign: 'center',
+    fontSize: 10,
+    color: '#6b7280',
   },
   lockedCard: {
     width: '100%',

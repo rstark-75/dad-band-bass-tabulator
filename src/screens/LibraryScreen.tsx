@@ -431,6 +431,9 @@ export function LibraryScreen({ navigation }: Props) {
               onDelete={() => {
                 void handleDeleteSong(song.id, song.title);
               }}
+              onExportPdf={() => navigation.navigate('ExportSong', { songId: song.id })}
+              onLockedPdfExport={() => showUpgradePrompt('PDF_EXPORT')}
+              isPdfExportLocked={tier === 'FREE'}
               onToggleCommunityRelease={
                 backendApi
                   ? () => {
