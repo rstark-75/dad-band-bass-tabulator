@@ -23,6 +23,8 @@ export interface SubscriptionSnapshot {
   tier: SubscriptionTier;
   status: SubscriptionStatus;
   communitySongsSaved: number;
+  communitySongsRemaining: number;
+  communitySongsSavedTotal: number;
   planCode: string | null;
   currency: BillingCurrency | null;
   unitAmountMinor: number | null;
@@ -31,6 +33,13 @@ export interface SubscriptionSnapshot {
   trialEnd: string | null;
   cancelAtPeriodEnd: boolean;
   capabilities: SubscriptionCapabilities;
+}
+
+export interface SubscriptionCommunityUsage {
+  maxCommunitySaves: number;
+  communitySongsSaved: number;
+  communitySongsRemaining: number;
+  communitySongsSavedTotal: number;
 }
 
 export interface SubscriptionPlanPrice {

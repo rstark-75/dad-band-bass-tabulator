@@ -280,9 +280,10 @@ export function ImportScreen({ navigation }: Props) {
     tier,
     capabilities,
     communitySongsSaved,
+    communitySongsRemaining,
+    communitySongsSavedTotal,
+    communityUsageLoaded,
     refresh,
-    setCommunitySongsSaved,
-    capabilityDefaults,
   } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const { authState } = useAuth();
@@ -309,6 +310,27 @@ export function ImportScreen({ navigation }: Props) {
   const [statusMessage, setStatusMessage] = useState('Browse community charts and save the ones you want to play.');
   const [ownershipFilter, setOwnershipFilter] = useState<'ALL' | 'MINE' | 'UNCLAIMED'>('ALL');
 
+  const syncSavedCommunitySongs = useCallback(
+    (savedSongs: Array<{ publishedSongId: string }>, catalog: CommunitySongListItem[]) => {
+      const savedPublishedIdSet = new Set(
+        new Set(
+          savedSongs
+            .map((item) => item.publishedSongId)
+            .filter((value): value is string => typeof value === 'string' && value.length > 0),
+        ),
+      );
+      const savedIdSet = new Set<string>(savedPublishedIdSet);
+      catalog.forEach((song) => {
+        const publishedId = song.publishedSongId ?? song.id;
+        if (savedIdSet.has(publishedId)) {
+          savedIdSet.add(resolveCommunitySaveId(song));
+        }
+      });
+      setSavedCommunitySongIds(Array.from(savedIdSet));
+    },
+    [],
+  );
+
   const hydrateCommunity = useCallback(async () => {
     if (!backendApi) {
       setCommunityCatalog([]);
@@ -326,14 +348,7 @@ export function ImportScreen({ navigation }: Props) {
       ]);
 
       const sortedSongs = sortCommunitySongs(releasedSongs.map(toCommunitySongListItem));
-      const savedIdSet = new Set<string>(savedSongs.map((item) => item.publishedSongId));
-      sortedSongs.forEach((song) => {
-        const publishedId = song.publishedSongId ?? song.id;
-        if (savedIdSet.has(publishedId)) {
-          savedIdSet.add(resolveCommunitySaveId(song));
-        }
-      });
-      setSavedCommunitySongIds(Array.from(savedIdSet));
+      syncSavedCommunitySongs(savedSongs, sortedSongs);
       setCommunityCatalog(sortedSongs);
       if (releasedSongs.length === 0) {
         setStatusMessage('No community charts have been released yet.');
@@ -350,7 +365,7 @@ export function ImportScreen({ navigation }: Props) {
         appLog.warn('Subscription refresh failed during community hydrate', error);
       });
     }
-  }, [backendApi, refresh]);
+  }, [backendApi, refresh, syncSavedCommunitySongs]);
 
   useEffect(() => {
     void hydrateCommunity();
@@ -363,24 +378,14 @@ export function ImportScreen({ navigation }: Props) {
     }, [hydrateCommunity]),
   );
 
-  const fallbackFreeCapabilities = capabilityDefaults?.free ?? {
-    maxCommunitySongs: FREE_PLAN_LIMITS.communitySaves,
-    maxCommunitySaves: FREE_PLAN_LIMITS.communitySaves,
-    maxSongs: FREE_PLAN_LIMITS.songs,
-    maxSetlists: FREE_PLAN_LIMITS.setlists,
-    maxStringCount: FREE_PLAN_LIMITS.strings,
-    svgEnabled: false,
-  };
-  const planCommunitySaveLimit =
-    capabilities.maxCommunitySaves ??
-    capabilities.maxCommunitySongs ??
-    fallbackFreeCapabilities.maxCommunitySaves ??
-    fallbackFreeCapabilities.maxCommunitySongs ??
-    (tier === 'FREE' ? FREE_PLAN_LIMITS.communitySaves : null);
-  const hasCommunityLimit = typeof planCommunitySaveLimit === 'number' && planCommunitySaveLimit >= 0;
-  const freeSaveSlotsLeft = hasCommunityLimit
-    ? Math.max(0, planCommunitySaveLimit - communitySongsSaved)
-    : 0;
+  const effectiveUnlimitedMaxCommunitySaves = 2_147_483_647;
+  const planCommunitySaveLimit = capabilities.maxCommunitySaves;
+  const hasUnlimitedCommunitySaves =
+    communitySongsRemaining === effectiveUnlimitedMaxCommunitySaves ||
+    planCommunitySaveLimit === effectiveUnlimitedMaxCommunitySaves;
+  const freeSaveSlotsLeft = hasUnlimitedCommunitySaves
+    ? null
+    : Math.max(0, communitySongsRemaining);
 
   const handleOpenPreview = async (song: CommunitySongListItem) => {
     if (previewLoadingSongId || savingSongId) {
@@ -444,8 +449,7 @@ export function ImportScreen({ navigation }: Props) {
 
     const saveId = resolveCommunitySaveId(selectedSong);
     const hasCommunitySave = savedCommunitySongIds.includes(saveId);
-    const maxSongs =
-      capabilities.maxSongs ?? fallbackFreeCapabilities.maxSongs ?? FREE_PLAN_LIMITS.songs;
+    const maxSongs = capabilities.maxSongs ?? FREE_PLAN_LIMITS.songs;
 
     if (tier === 'FREE' && songs.length >= maxSongs) {
       showUpgradePrompt('SONG_LIMIT');
@@ -457,13 +461,25 @@ export function ImportScreen({ navigation }: Props) {
       hasCommunitySave,
       planCommunitySaveLimit,
       communitySongsSaved,
-      hasCommunityLimit,
+      communitySongsRemaining,
+      hasUnlimitedCommunitySaves,
     });
 
-    if (!hasCommunitySave && hasCommunityLimit && communitySongsSaved >= planCommunitySaveLimit) {
+    if (
+      communityUsageLoaded &&
+      !hasCommunitySave &&
+      !hasUnlimitedCommunitySaves &&
+      communitySongsRemaining <= 0
+    ) {
       appLog.warn(
         'Community save blocked',
-        { communitySongsSaved, planCommunitySaveLimit, hasCommunitySave, song: selectedSong.title },
+        {
+          communitySongsSaved,
+          communitySongsRemaining,
+          planCommunitySaveLimit,
+          hasCommunitySave,
+          song: selectedSong.title,
+        },
       );
       showUpgradePrompt('COMMUNITY_SAVE');
       return;
@@ -483,7 +499,8 @@ export function ImportScreen({ navigation }: Props) {
             savedResponse,
             { hasCommunitySave, communitySongsSaved, next: savedResponse.communitySongsSaved },
           );
-          setCommunitySongsSaved(savedResponse.communitySongsSaved);
+          await refresh();
+          syncSavedCommunitySongs(await backendApi.listSavedCommunitySongs(), communityCatalog);
         } catch (error) {
           const trigger = resolveUpgradeTrigger(error);
 
@@ -772,9 +789,11 @@ export function ImportScreen({ navigation }: Props) {
         {tier !== 'PRO' ? (
           <>
             <Text style={styles.planText}>
-              {hasCommunityLimit
-                ? `${freeSaveSlotsLeft} save${freeSaveSlotsLeft === 1 ? '' : 's'} left on the free plan.`
-                : 'Unlimited saves.'}
+              {!communityUsageLoaded
+                ? 'Checking community save allowance...'
+                : hasUnlimitedCommunitySaves
+                  ? 'Unlimited saves.'
+                  : `${freeSaveSlotsLeft} save${freeSaveSlotsLeft === 1 ? '' : 's'} left on the free plan.`}
             </Text>
             <Pressable onPress={() => navigation.navigate('Upgrade')}>
               <Text style={styles.planLink}>Upgrade to Pro →</Text>
@@ -786,6 +805,13 @@ export function ImportScreen({ navigation }: Props) {
       </View>
 
       <Text style={styles.statusText}>{statusMessage}</Text>
+      {communityUsageLoaded ? (
+        <Text style={styles.statusText}>
+          {hasUnlimitedCommunitySaves
+            ? `${communitySongsSaved} saved. Unlimited plan allowance. Lifetime saves: ${communitySongsSavedTotal}.`
+            : `${communitySongsSaved}/${planCommunitySaveLimit ?? 0} current saves. Lifetime saves: ${communitySongsSavedTotal}.`}
+        </Text>
+      ) : null}
 
       <View style={styles.filterRow}>
         {(['ALL', 'MINE', 'UNCLAIMED'] as const).map((filter) => (
@@ -835,7 +861,10 @@ export function ImportScreen({ navigation }: Props) {
           const isInLibrary =
             importedPublishedSongIds.has(publishedId) || importedPublishedSongIds.has(saveId);
           const limitReached =
-            hasCommunityLimit && communitySongsSaved >= planCommunitySaveLimit && !hasCommunitySave;
+            communityUsageLoaded &&
+            !hasUnlimitedCommunitySaves &&
+            communitySongsRemaining <= 0 &&
+            !hasCommunitySave;
           const isOrphaned = song.ownershipStatus === 'ORPHANED';
           const isOwner =
             !isOrphaned &&

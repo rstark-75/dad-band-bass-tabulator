@@ -98,6 +98,15 @@ export interface SubscriptionSnapshotDto {
   cancelAtPeriodEnd: boolean;
   capabilities: SubscriptionCapabilitiesDto;
   communitySongsSaved: number;
+  communitySongsRemaining: number;
+  communitySongsSavedTotal: number;
+}
+
+export interface SubscriptionCommunityUsageDto {
+  maxCommunitySaves: number;
+  communitySongsSaved: number;
+  communitySongsRemaining: number;
+  communitySongsSavedTotal: number;
 }
 
 export interface SubscriptionPriceDto {
@@ -501,14 +510,34 @@ const toSubscriptionSnapshotDto = (value: unknown): SubscriptionSnapshotDto | nu
   const cancelAtPeriodEndRaw = coerceAliasedValue(value, ['cancelAtPeriodEnd', 'cancel_at_period_end']);
   const capabilitiesRaw = coerceAliasedValue(value, ['capabilities', 'subscriptionCapabilities', 'subscription_capabilities']);
   const communitySongsSavedRaw = coerceAliasedValue(value, ['communitySongsSaved', 'community_songs_saved']);
+  const communitySongsRemainingRaw = coerceAliasedValue(value, [
+    'communitySongsRemaining',
+    'community_songs_remaining',
+  ]);
+  const communitySongsSavedTotalRaw = coerceAliasedValue(value, [
+    'communitySongsSavedTotal',
+    'community_songs_saved_total',
+  ]);
 
   const tier = normalizeSubscriptionTier(tierRaw, planRaw);
   const status = normalizeSubscriptionStatus(statusRaw) ?? 'free';
   const plan = normalizeSubscriptionPlan(planRaw, tier);
+  const capabilities = toSubscriptionCapabilitiesDto(capabilitiesRaw);
   const communitySongsSaved =
     typeof communitySongsSavedRaw === 'number' && Number.isFinite(communitySongsSavedRaw)
       ? Math.max(0, Math.floor(communitySongsSavedRaw))
       : 0;
+  const maxCommunitySaves = capabilities.maxCommunitySaves;
+  const communitySongsRemaining =
+    typeof communitySongsRemainingRaw === 'number' && Number.isFinite(communitySongsRemainingRaw)
+      ? Math.max(0, Math.floor(communitySongsRemainingRaw))
+      : typeof maxCommunitySaves === 'number' && Number.isFinite(maxCommunitySaves)
+        ? Math.max(0, Math.floor(maxCommunitySaves) - communitySongsSaved)
+        : 0;
+  const communitySongsSavedTotal =
+    typeof communitySongsSavedTotalRaw === 'number' && Number.isFinite(communitySongsSavedTotalRaw)
+      ? Math.max(0, Math.floor(communitySongsSavedTotalRaw))
+      : communitySongsSaved;
 
   return {
     tier,
@@ -521,8 +550,47 @@ const toSubscriptionSnapshotDto = (value: unknown): SubscriptionSnapshotDto | nu
     currentPeriodEnd: coerceNullableString(currentPeriodEndRaw, null),
     trialEnd: coerceNullableString(trialEndRaw, null),
     cancelAtPeriodEnd: typeof cancelAtPeriodEndRaw === 'boolean' ? cancelAtPeriodEndRaw : false,
-    capabilities: toSubscriptionCapabilitiesDto(capabilitiesRaw),
+    capabilities,
     communitySongsSaved,
+    communitySongsRemaining,
+    communitySongsSavedTotal,
+  };
+};
+
+const toSubscriptionCommunityUsageDto = (value: unknown): SubscriptionCommunityUsageDto | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const maxCommunitySavesRaw = coerceAliasedValue(value, ['maxCommunitySaves', 'max_community_saves']);
+  const communitySongsSavedRaw = coerceAliasedValue(value, ['communitySongsSaved', 'community_songs_saved']);
+  const communitySongsRemainingRaw = coerceAliasedValue(value, [
+    'communitySongsRemaining',
+    'community_songs_remaining',
+  ]);
+  const communitySongsSavedTotalRaw = coerceAliasedValue(value, [
+    'communitySongsSavedTotal',
+    'community_songs_saved_total',
+  ]);
+
+  if (
+    typeof maxCommunitySavesRaw !== 'number' ||
+    !Number.isFinite(maxCommunitySavesRaw) ||
+    typeof communitySongsSavedRaw !== 'number' ||
+    !Number.isFinite(communitySongsSavedRaw) ||
+    typeof communitySongsRemainingRaw !== 'number' ||
+    !Number.isFinite(communitySongsRemainingRaw) ||
+    typeof communitySongsSavedTotalRaw !== 'number' ||
+    !Number.isFinite(communitySongsSavedTotalRaw)
+  ) {
+    return null;
+  }
+
+  return {
+    maxCommunitySaves: Math.max(0, Math.floor(maxCommunitySavesRaw)),
+    communitySongsSaved: Math.max(0, Math.floor(communitySongsSavedRaw)),
+    communitySongsRemaining: Math.max(0, Math.floor(communitySongsRemainingRaw)),
+    communitySongsSavedTotal: Math.max(0, Math.floor(communitySongsSavedTotalRaw)),
   };
 };
 
@@ -893,6 +961,15 @@ export const parseSubscriptionSnapshotDto = (value: unknown): SubscriptionSnapsh
   }
 
   return snapshot;
+};
+
+export const parseSubscriptionCommunityUsageDto = (value: unknown): SubscriptionCommunityUsageDto => {
+  const usage = toSubscriptionCommunityUsageDto(value);
+  if (!usage) {
+    throw new Error('Invalid subscription community usage response payload.');
+  }
+
+  return usage;
 };
 
 const isCheckoutSessionDto = (value: unknown): value is CheckoutSessionDto =>

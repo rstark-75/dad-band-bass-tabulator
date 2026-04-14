@@ -42,7 +42,10 @@ interface SubscriptionContextValue {
   upgrade: () => Promise<void>;
   refresh: () => Promise<void>;
   communitySongsSaved: number;
+  communitySongsRemaining: number;
+  communitySongsSavedTotal: number;
   setCommunitySongsSaved: (value: number) => void;
+  communityUsageLoaded: boolean;
   capabilityDefaults: SubscriptionCapabilityDefaults | null;
   capabilityDefaultsLoaded: boolean;
   isLoading: boolean;
@@ -78,6 +81,7 @@ const serializePricing = (pricing: SubscriptionPricing) =>
     .join(';');
 
 const SubscriptionContext = createContext<SubscriptionContextValue | undefined>(undefined);
+const INT_MAX = 2_147_483_647;
 
 const formatMinorCurrency = (amountMinor: number, currency: BillingCurrency): string => {
   try {
@@ -150,6 +154,23 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
     }
 
     const nextSnapshot = await subscriptionService.loadSnapshot();
+    let mergedSnapshot = nextSnapshot;
+
+    try {
+      const usage = await subscriptionService.loadCommunityUsage();
+      mergedSnapshot = {
+        ...nextSnapshot,
+        capabilities: {
+          ...nextSnapshot.capabilities,
+          maxCommunitySaves: usage.maxCommunitySaves,
+        },
+        communitySongsSaved: usage.communitySongsSaved,
+        communitySongsRemaining: usage.communitySongsRemaining,
+        communitySongsSavedTotal: usage.communitySongsSavedTotal,
+      };
+    } catch (error) {
+      appLog.warn('Subscription community usage refresh failed', error);
+    }
 
     try {
       const nextPricing = await subscriptionService.loadPricing();
@@ -158,17 +179,17 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
       appLog.warn('Subscription pricing refresh failed', error);
     }
 
-    setSnapshot(nextSnapshot);
+    setSnapshot(mergedSnapshot);
     appLog.info(
       'Subscription snapshot',
-      nextSnapshot.communitySongsSaved,
-      nextSnapshot.capabilities,
+      mergedSnapshot.communitySongsSaved,
+      mergedSnapshot.capabilities,
     );
 
     logClientEvent('info', 'subscription.snapshot_refreshed', {
-      tier: nextSnapshot.tier,
-      status: nextSnapshot.status,
-      cancelAtPeriodEnd: nextSnapshot.cancelAtPeriodEnd,
+      tier: mergedSnapshot.tier,
+      status: mergedSnapshot.status,
+      cancelAtPeriodEnd: mergedSnapshot.cancelAtPeriodEnd,
     });
   }, [isAuthenticated, updatePricingIfChanged]);
 
@@ -179,7 +200,19 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
       }
 
       appLog.info('Set communitySongsSaved', value);
-      return { ...current, communitySongsSaved: value };
+      const maxCommunitySaves = current.capabilities.maxCommunitySaves;
+      const communitySongsRemaining =
+        typeof maxCommunitySaves === 'number'
+          ? maxCommunitySaves >= INT_MAX
+            ? INT_MAX
+            : Math.max(0, maxCommunitySaves - value)
+          : current.communitySongsRemaining;
+
+      return {
+        ...current,
+        communitySongsSaved: value,
+        communitySongsRemaining,
+      };
     });
   }, []);
 
@@ -402,7 +435,10 @@ export function SubscriptionProvider({ children }: PropsWithChildren) {
       upgrade,
       refresh,
       communitySongsSaved: snapshot?.communitySongsSaved ?? 0,
+      communitySongsRemaining: snapshot?.communitySongsRemaining ?? 0,
+      communitySongsSavedTotal: snapshot?.communitySongsSavedTotal ?? 0,
       setCommunitySongsSaved,
+      communityUsageLoaded: snapshot !== null,
       capabilityDefaults,
       capabilityDefaultsLoaded: capabilityDefaults !== null,
       isLoading,

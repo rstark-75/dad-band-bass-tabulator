@@ -22,6 +22,7 @@ import {
   parseSongMetadataDto,
   parseSongChartDto,
   parseSubscriptionCapabilityDefaultsDto,
+  parseSubscriptionCommunityUsageDto,
   parseBillingPortalSessionDto,
   parseSubscriptionCancelResponseDto,
   parseSubscriptionPricingDto,
@@ -32,6 +33,7 @@ import {
   DeleteSongWithPolicyIntentDto,
   DeleteSongWithPolicyResponseDto,
   SubscriptionCapabilityDefaultsDto,
+  SubscriptionCommunityUsageDto,
   SubscriptionCancelResponseDto,
   SubscriptionPricingDto,
   SubscriptionSnapshotDto,
@@ -66,6 +68,7 @@ export interface BassTabApi {
   getPlaylist(): Promise<PlaylistDto>;
   replacePlaylistOrder(payload: ReplacePlaylistOrderRequestDto): Promise<PlaylistDto>;
   getSubscription(): Promise<SubscriptionSnapshotDto>;
+  getSubscriptionCommunityUsage(): Promise<SubscriptionCommunityUsageDto>;
   getSubscriptionPricing(): Promise<SubscriptionPricingDto>;
   getSubscriptionCapabilityDefaults(): Promise<SubscriptionCapabilityDefaultsDto>;
   upgrade(payload: SubscriptionUpgradeRequestDto): Promise<SubscriptionUpgradeResponseDto>;
@@ -321,6 +324,14 @@ export class HttpBassTabApi implements BassTabApi {
 
   async getSubscription(): Promise<SubscriptionSnapshotDto> {
     return this.request('/v1/subscription', { method: 'GET' }, parseSubscriptionSnapshotDto);
+  }
+
+  async getSubscriptionCommunityUsage(): Promise<SubscriptionCommunityUsageDto> {
+    return this.request(
+      '/v1/subscription/community-usage',
+      { method: 'GET' },
+      parseSubscriptionCommunityUsageDto,
+    );
   }
 
   async getSubscriptionPricing(): Promise<SubscriptionPricingDto> {

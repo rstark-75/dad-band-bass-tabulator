@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import { BassTabApi, createBassTabApiFromEnv } from '../../api';
 import {
   SubscriptionCapabilityDefaultsDto,
+  SubscriptionCommunityUsageDto,
   SubscriptionCancelResponseDto,
   SubscriptionPricingDto,
   SubscriptionSnapshotDto,
@@ -13,6 +14,7 @@ import {
 import {
   BillingCurrency,
   SubscriptionCapabilityDefaults,
+  SubscriptionCommunityUsage,
   SubscriptionPricing,
   SubscriptionSnapshot,
 } from './subscriptionTypes';
@@ -40,6 +42,8 @@ const defaultFreeSnapshot: SubscriptionSnapshot = {
   cancelAtPeriodEnd: false,
   capabilities: { ...DEFAULT_SUBSCRIPTION_CAPABILITIES },
   communitySongsSaved: 0,
+  communitySongsRemaining: DEFAULT_SUBSCRIPTION_CAPABILITIES.maxCommunitySaves ?? 0,
+  communitySongsSavedTotal: 0,
 };
 
 const defaultPricing: SubscriptionPricing = {
@@ -53,6 +57,8 @@ const mapSnapshot = (snapshot: SubscriptionSnapshotDto): SubscriptionSnapshot =>
   tier: snapshot.plan === 'pro' || snapshot.tier === 'PRO' ? 'PRO' : 'FREE',
   status: snapshot.status,
   communitySongsSaved: snapshot.communitySongsSaved,
+  communitySongsRemaining: snapshot.communitySongsRemaining,
+  communitySongsSavedTotal: snapshot.communitySongsSavedTotal,
   planCode: snapshot.planCode,
   currency: snapshot.currency,
   unitAmountMinor: snapshot.unitAmountMinor,
@@ -116,8 +122,16 @@ const mapCapabilityDefaults = (
   },
 });
 
+const mapCommunityUsage = (usage: SubscriptionCommunityUsageDto): SubscriptionCommunityUsage => ({
+  maxCommunitySaves: usage.maxCommunitySaves,
+  communitySongsSaved: usage.communitySongsSaved,
+  communitySongsRemaining: usage.communitySongsRemaining,
+  communitySongsSavedTotal: usage.communitySongsSavedTotal,
+});
+
 export interface SubscriptionService {
   loadSnapshot: () => Promise<SubscriptionSnapshot>;
+  loadCommunityUsage: () => Promise<SubscriptionCommunityUsage>;
   loadPricing: () => Promise<SubscriptionPricing>;
   loadCapabilityDefaults: () => Promise<SubscriptionCapabilityDefaults>;
   upgradeToPro: (currency?: BillingCurrency) => Promise<SubscriptionUpgradeResponseDto>;
@@ -150,6 +164,19 @@ class HybridSubscriptionService implements SubscriptionService {
     }
 
     return mapSnapshot(await this.api.getSubscription());
+  }
+
+  async loadCommunityUsage(): Promise<SubscriptionCommunityUsage> {
+    if (!this.api) {
+      return {
+        maxCommunitySaves: DEFAULT_SUBSCRIPTION_CAPABILITIES.maxCommunitySaves ?? 0,
+        communitySongsSaved: 0,
+        communitySongsRemaining: DEFAULT_SUBSCRIPTION_CAPABILITIES.maxCommunitySaves ?? 0,
+        communitySongsSavedTotal: 0,
+      };
+    }
+
+    return mapCommunityUsage(await this.api.getSubscriptionCommunityUsage());
   }
 
   async loadPricing(): Promise<SubscriptionPricing> {
