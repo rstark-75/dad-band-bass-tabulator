@@ -4,7 +4,7 @@ export const DEFAULT_SUBSCRIPTION_CAPABILITIES = {
   maxSongs: 20,
   maxSetlists: 1,
   maxCommunitySongs: 5,
-  maxCommunitySaves: 0,
+  maxCommunitySaves: null,
   maxStringCount: 4,
   svgEnabled: false,
   maxAiGenerations: 15,
