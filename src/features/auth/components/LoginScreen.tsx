@@ -54,7 +54,7 @@ export function LoginScreen() {
     <ScreenContainer contentStyle={styles.container}>
       <View style={styles.card}>
         <DadBandBrandBanner variant="compact" subtitle="Sign in and jump straight back in" />
-        <Text style={styles.title}>Welcome back to BassTab</Text>
+        <Text style={styles.title}>Welcome back to Dad Band Bass</Text>
         <Text style={styles.body}>
           Pick up where you left off.
         </Text>
