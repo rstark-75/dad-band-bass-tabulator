@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { TabPagePreview, TabPreviewRenderMode } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
-import { useSubscription, useUpgradePrompt } from '../features/subscription';
+import { useSubscription } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { Song } from '../types/models';
@@ -15,6 +15,8 @@ import { parseTab } from '../utils/tabLayout';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SetlistPerformance'>;
 type PerformanceTone = 'light' | 'dark';
+const FREE_SVG_ROW_LIMIT = 2;
+const DEFAULT_BARS_PER_ROW = 4;
 
 interface PerformanceItem {
   song: Song;
@@ -24,10 +26,51 @@ interface PerformanceItem {
   rowBarCounts: ReturnType<typeof flattenSongRowsToChart>['rowBarCounts'];
 }
 
-export function SetlistPerformanceScreen({ route }: Props) {
+function resolvePreviewRowCounts(rowBarCounts: number[] | undefined, totalBars: number): number[] {
+  if (rowBarCounts && rowBarCounts.length > 0) {
+    return rowBarCounts.filter((count) => count > 0);
+  }
+
+  return Array.from(
+    { length: Math.max(1, Math.ceil(totalBars / DEFAULT_BARS_PER_ROW)) },
+    () => DEFAULT_BARS_PER_ROW,
+  );
+}
+
+function getFreeSvgPerformanceItem(
+  item: PerformanceItem,
+): {
+  bars: PerformanceItem['bars'];
+  rowAnnotations: PerformanceItem['rowAnnotations'];
+  rowBarCounts: number[];
+  isTruncated: boolean;
+} {
+  const resolvedCounts = resolvePreviewRowCounts(item.rowBarCounts, item.bars.length);
+  const isTruncated = resolvedCounts.length > FREE_SVG_ROW_LIMIT;
+
+  if (!isTruncated) {
+    return {
+      bars: item.bars,
+      rowAnnotations: item.rowAnnotations,
+      rowBarCounts: resolvedCounts,
+      isTruncated: false,
+    };
+  }
+
+  const limitedCounts = resolvedCounts.slice(0, FREE_SVG_ROW_LIMIT);
+  const shownBarCount = limitedCounts.reduce((sum, count) => sum + count, 0);
+
+  return {
+    bars: item.bars.slice(0, shownBarCount),
+    rowAnnotations: item.rowAnnotations.slice(0, limitedCounts.length),
+    rowBarCounts: limitedCounts,
+    isTruncated: true,
+  };
+}
+
+export function SetlistPerformanceScreen({ route, navigation }: Props) {
   const { setlistId, startSongId } = route.params ?? {};
-  const { capabilities } = useSubscription();
-  const { showUpgradePrompt } = useUpgradePrompt();
+  const { capabilities, tier } = useSubscription();
   const { width } = useWindowDimensions();
   const { songs, setlists, activeSetlistId } = useBassTab();
   const [renderMode, setRenderMode] = useState<TabPreviewRenderMode>('ascii');
@@ -110,11 +153,6 @@ export function SetlistPerformanceScreen({ route }: Props) {
   const svgViewportWidth = Math.max(240, canvasWidth - canvasHorizontalPadding * 2);
 
   const handleRenderModeChange = (mode: TabPreviewRenderMode) => {
-    if (mode === 'svg' && !capabilities.svgEnabled) {
-      showUpgradePrompt('SVG_MODE');
-      return;
-    }
-
     setRenderMode(mode);
   };
   const handleToneChange = (nextTone: PerformanceTone) => {
@@ -190,7 +228,7 @@ export function SetlistPerformanceScreen({ route }: Props) {
                       renderMode === mode && styles.renderModeOptionTextActive,
                     ]}
                   >
-                    {mode === 'svg' && !capabilities.svgEnabled ? 'SVG PRO' : mode.toUpperCase()}
+                    {mode.toUpperCase()}
                   </Text>
                 </Pressable>
               ))}
@@ -241,6 +279,17 @@ export function SetlistPerformanceScreen({ route }: Props) {
             </Text>
           </View>
 
+          {(() => {
+            const isFreeSvgMode = tier !== 'PRO' && renderMode === 'svg';
+            const freeSvgItem = isFreeSvgMode ? getFreeSvgPerformanceItem(currentItem) : null;
+            const displayBars = freeSvgItem ? freeSvgItem.bars : currentItem.bars;
+            const displayRowAnnotations = freeSvgItem
+              ? freeSvgItem.rowAnnotations
+              : currentItem.rowAnnotations;
+            const displayRowBarCounts = freeSvgItem ? freeSvgItem.rowBarCounts : currentItem.rowBarCounts;
+            const showFreeSvgUpsell = Boolean(freeSvgItem?.isTruncated);
+
+            return (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={isPhone}
@@ -256,17 +305,31 @@ export function SetlistPerformanceScreen({ route }: Props) {
             >
               <TabPagePreview
                 stringNames={currentItem.stringNames}
-                bars={currentItem.bars}
-                rowAnnotations={currentItem.rowAnnotations}
-                rowBarCounts={currentItem.rowBarCounts}
+                bars={displayBars}
+                rowAnnotations={displayRowAnnotations}
+                rowBarCounts={displayRowBarCounts}
                 tone={tone}
                 compact={useCompactPreview}
                 renderMode={renderMode}
                 svgScaleProfile="performance"
                 svgViewportWidth={svgViewportWidth}
               />
+              {showFreeSvgUpsell ? (
+                <View style={styles.freeSvgUpsellWrap}>
+                  <Text style={styles.freeSvgUpsellText}>
+                    Showing first 2 rows only in SVG on Free.
+                  </Text>
+                  <Pressable onPress={() => navigation.navigate('Upgrade')}>
+                    <Text style={styles.freeSvgUpsellLink}>
+                      Go Pro for full chart preview.
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           </ScrollView>
+            );
+          })()}
 
           <View style={[styles.controlsCard, isPhone && styles.controlsCardPhone]}>
             <View style={styles.controlsRow}>
@@ -421,6 +484,23 @@ const styles = StyleSheet.create({
   },
   canvasScrollerPhone: {
     justifyContent: 'flex-start',
+  },
+  freeSvgUpsellWrap: {
+    marginTop: 10,
+    gap: 2,
+  },
+  freeSvgUpsellText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: palette.liveMuted,
+  },
+  freeSvgUpsellLink: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '800',
+    color: palette.accent,
+    textDecorationLine: 'underline',
   },
   pageCanvas: {
     borderRadius: 24,

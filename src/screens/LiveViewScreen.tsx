@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TabPagePreview, TabPreviewRenderMode } from '../components/TabPagePreview';
 import { palette } from '../constants/colors';
-import { useSubscription, useUpgradePrompt } from '../features/subscription';
+import { useSubscription } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { flattenSongRowsToChart } from '../utils/songChart';
@@ -13,11 +13,58 @@ import { parseTab } from '../utils/tabLayout';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PerformanceView'>;
 type PerformanceTone = 'light' | 'dark';
+const FREE_SVG_ROW_LIMIT = 2;
+const DEFAULT_BARS_PER_ROW = 4;
 
-export function LiveViewScreen({ route }: Props) {
+function resolvePreviewRowCounts(rowBarCounts: number[] | undefined, totalBars: number): number[] {
+  if (rowBarCounts && rowBarCounts.length > 0) {
+    return rowBarCounts.filter((count) => count > 0);
+  }
+
+  return Array.from(
+    { length: Math.max(1, Math.ceil(totalBars / DEFAULT_BARS_PER_ROW)) },
+    () => DEFAULT_BARS_PER_ROW,
+  );
+}
+
+function getFreeSvgPreviewData(
+  input: {
+    bars: ReturnType<typeof parseTab>['bars'];
+    rowAnnotations: ReturnType<typeof flattenSongRowsToChart>['rowAnnotations'];
+    rowBarCounts: ReturnType<typeof flattenSongRowsToChart>['rowBarCounts'];
+  },
+): {
+  bars: ReturnType<typeof parseTab>['bars'];
+  rowAnnotations: ReturnType<typeof flattenSongRowsToChart>['rowAnnotations'];
+  rowBarCounts: number[];
+  isTruncated: boolean;
+} {
+  const resolvedCounts = resolvePreviewRowCounts(input.rowBarCounts, input.bars.length);
+  const isTruncated = resolvedCounts.length > FREE_SVG_ROW_LIMIT;
+
+  if (!isTruncated) {
+    return {
+      bars: input.bars,
+      rowAnnotations: input.rowAnnotations,
+      rowBarCounts: resolvedCounts,
+      isTruncated: false,
+    };
+  }
+
+  const limitedCounts = resolvedCounts.slice(0, FREE_SVG_ROW_LIMIT);
+  const shownBarCount = limitedCounts.reduce((sum, count) => sum + count, 0);
+
+  return {
+    bars: input.bars.slice(0, shownBarCount),
+    rowAnnotations: input.rowAnnotations.slice(0, limitedCounts.length),
+    rowBarCounts: limitedCounts,
+    isTruncated: true,
+  };
+}
+
+export function LiveViewScreen({ route, navigation }: Props) {
   const { songId } = route.params;
-  const { capabilities } = useSubscription();
-  const { showUpgradePrompt } = useUpgradePrompt();
+  const { capabilities, tier } = useSubscription();
   const { songs } = useBassTab();
   const [renderMode, setRenderMode] = useState<TabPreviewRenderMode>('ascii');
   const [tone, setTone] = useState<PerformanceTone>('light');
@@ -38,27 +85,36 @@ export function LiveViewScreen({ route }: Props) {
     () => (song ? flattenSongRowsToChart(song) : undefined),
     [song],
   );
-  const tabPreview = useMemo(() => {
+  const previewData = useMemo(() => {
     if (!chart) {
       return null;
     }
 
     const { stringNames, bars } = parseTab(chart.tab);
+    const freeSvgPreview = getFreeSvgPreviewData({
+      bars,
+      rowAnnotations: chart.rowAnnotations ?? [],
+      rowBarCounts: chart.rowBarCounts,
+    });
+    const isFreeSvgMode = tier !== 'PRO' && renderMode === 'svg';
+    const displayData = isFreeSvgMode
+      ? {
+        bars: freeSvgPreview.bars,
+        rowAnnotations: freeSvgPreview.rowAnnotations,
+        rowBarCounts: freeSvgPreview.rowBarCounts,
+      }
+      : {
+        bars,
+        rowAnnotations: chart.rowAnnotations ?? [],
+        rowBarCounts: chart.rowBarCounts,
+      };
 
-    return (
-      <TabPagePreview
-        stringNames={stringNames}
-        bars={bars}
-        rowAnnotations={chart.rowAnnotations ?? []}
-        rowBarCounts={chart.rowBarCounts}
-        tone={tone}
-        compact={useCompactPreview}
-        renderMode={renderMode}
-        svgScaleProfile="performance"
-        svgViewportWidth={svgViewportWidth}
-      />
-    );
-  }, [chart, renderMode, svgViewportWidth, tone, useCompactPreview]);
+    return {
+      stringNames,
+      ...displayData,
+      showFreeSvgUpsell: isFreeSvgMode && freeSvgPreview.isTruncated,
+    };
+  }, [chart, renderMode, tier]);
 
   useEffect(() => {
     if (hasAutoSelectedSvgModeRef.current) {
@@ -74,11 +130,6 @@ export function LiveViewScreen({ route }: Props) {
   }, [capabilities.svgEnabled]);
 
   const handleRenderModeChange = (mode: TabPreviewRenderMode) => {
-    if (mode === 'svg' && !capabilities.svgEnabled) {
-      showUpgradePrompt('SVG_MODE');
-      return;
-    }
-
     setRenderMode(mode);
   };
   const handleToneChange = (nextTone: PerformanceTone) => {
@@ -122,7 +173,7 @@ export function LiveViewScreen({ route }: Props) {
                       renderMode === mode && styles.renderModeOptionTextActive,
                     ]}
                   >
-                    {mode === 'svg' && !capabilities.svgEnabled ? 'SVG PRO' : mode.toUpperCase()}
+                    {mode.toUpperCase()}
                   </Text>
                 </Pressable>
               ))}
@@ -179,7 +230,33 @@ export function LiveViewScreen({ route }: Props) {
                 { width: canvasWidth, maxWidth: canvasWidth },
               ]}
             >
-              {tabPreview}
+              {previewData ? (
+                <>
+                  <TabPagePreview
+                    stringNames={previewData.stringNames}
+                    bars={previewData.bars}
+                    rowAnnotations={previewData.rowAnnotations}
+                    rowBarCounts={previewData.rowBarCounts}
+                    tone={tone}
+                    compact={useCompactPreview}
+                    renderMode={renderMode}
+                    svgScaleProfile="performance"
+                    svgViewportWidth={svgViewportWidth}
+                  />
+                  {previewData.showFreeSvgUpsell ? (
+                    <View style={styles.freeSvgUpsellWrap}>
+                      <Text style={styles.freeSvgUpsellText}>
+                        Showing first 2 rows only in SVG on Free.
+                      </Text>
+                      <Pressable onPress={() => navigation.navigate('Upgrade')}>
+                        <Text style={styles.freeSvgUpsellLink}>
+                          Go Pro for full chart preview.
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
             </View>
           </ScrollView>
         </View>
@@ -312,6 +389,23 @@ const styles = StyleSheet.create({
   },
   canvasScrollerWide: {
     justifyContent: 'center',
+  },
+  freeSvgUpsellWrap: {
+    marginTop: 10,
+    gap: 2,
+  },
+  freeSvgUpsellText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: palette.liveMuted,
+  },
+  freeSvgUpsellLink: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '800',
+    color: palette.accent,
+    textDecorationLine: 'underline',
   },
   emptyState: {
     flex: 1,
