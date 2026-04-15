@@ -132,6 +132,7 @@ export function SectionEditorCard({
   const { showUpgradePrompt } = useUpgradePrompt();
   const isPreviewCompact = width < 760;
   const isCompactLayout = width < 760;
+  const useCompactPreviewScroller = isCompactLayout && Platform.OS === 'web';
   const editorSvgViewportWidth = Math.max(260, width - (isPreviewCompact ? 72 : 148));
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -581,7 +582,7 @@ export function SectionEditorCard({
                           : ''}
                       </Text>
                       {activeRowIndex !== row.rowIndex ? (
-                        isCompactLayout ? (
+                        useCompactPreviewScroller ? (
                           <ScrollView
                             horizontal
                             nestedScrollEnabled
