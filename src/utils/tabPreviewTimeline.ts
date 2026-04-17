@@ -115,7 +115,7 @@ const hasDelimiterAtSlotOnString = (
   const bar = rowBars[location.barIndex];
   const value = bar?.cells[stringName]?.[location.slotIndex];
 
-  return typeof value === 'string' && value.includes('.');
+  return typeof value === 'string' && (value.includes('.') || value.includes('|'));
 };
 
 const computeEmptySlotsUntilNextOnset = (

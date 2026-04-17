@@ -18,36 +18,43 @@ import {
 } from 'react-native';
 
 import { palette } from '../constants/colors';
-import { SongChart, TabRowAnnotation } from '../types/models';
+import { SongBar, SongChart, TabRowAnnotation } from '../types/models';
 import { normalizeRowBarCounts } from '../utils/songChart';
 import {
   DEFAULT_BEAT_COUNT,
   MAX_BEAT_COUNT,
   MIN_BEAT_COUNT,
   SLOTS_PER_BEAT,
-  getBarBeatCount,
-  getBarSlotCount,
   getSlotsPerBar,
   normalizeBeatCount,
-  insertBar,
   parseTab,
   ParsedBar,
-  removeBar,
   renderTab,
-  updateBarCell,
 } from '../utils/tabLayout';
+import {
+  EDITOR_EMPTY_SLOT,
+  EditorBeat,
+  EditorBeatSplit,
+  getSongBarBeatCountFromEvents,
+  getSongBarSlotCountFromEvents,
+  normalizeEditorSlotToken,
+  projectEditorBarToSongBar,
+  projectSongBarToEditorBar,
+} from '../utils/editorChartV2';
 import { useSubscription, useUpgradePrompt } from '../features/subscription';
 import { PrimaryButton } from './PrimaryButton';
 import { TabPagePreview, TabPreviewRenderMode } from './TabPagePreview';
 
 interface SectionEditorCardProps {
   section: SongChart;
+  stringNamesOverride?: string[];
+  barsOverride?: SongBar[];
   index: number;
   isFirst: boolean;
   isLast: boolean;
   showSectionControls?: boolean;
   saveSignal?: number;
-  onChange: (updates: Partial<SongChart>) => void;
+  onChange: (updates: Partial<SongChart> & { bars?: SongBar[]; stringNames?: string[] }) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -61,44 +68,88 @@ const PREVIEW_RENDER_MODES: TabPreviewRenderMode[] = ['ascii', 'svg'];
 const normalizeBarNotes = (barCount: number, barNotes?: string[]): string[] =>
   Array.from({ length: barCount }, (_, index) => barNotes?.[index] ?? '');
 
-const getBeatLabels = (beatCount: number): string[] =>
-  Array.from({ length: normalizeBeatCount(beatCount) * SLOTS_PER_BEAT }, (_, index) =>
-    index % SLOTS_PER_BEAT === 0 ? String(Math.floor(index / SLOTS_PER_BEAT) + 1) : '&',
+const getBeatPulseLabels = (beat: EditorBeat): string[] =>
+  Array.from({ length: beat.split }, (_, pulseIndex) => {
+    if (beat.pulseLabels[pulseIndex]) {
+      return beat.pulseLabels[pulseIndex];
+    }
+
+    if (pulseIndex === 0) {
+      return String(beat.beatNumber);
+    }
+
+    if (beat.split === 2) {
+      return '&';
+    }
+
+    if (beat.split === 3) {
+      return pulseIndex === 1 ? '&' : 'a';
+    }
+
+    return ['e', '&', 'a'][pulseIndex - 1] ?? '';
+  });
+
+const getEditorBeatsForBar = (
+  bar: SongBar,
+  stringNames: string[],
+  defaultBeatCount = DEFAULT_BEAT_COUNT,
+): EditorBeat[] => projectSongBarToEditorBar(bar, stringNames, defaultBeatCount).beats;
+
+const getBeatLabels = (bar: SongBar, stringNames: string[], defaultBeatCount: number): string[] =>
+  getEditorBeatsForBar(bar, stringNames, defaultBeatCount).flatMap((beat) => getBeatPulseLabels(beat));
+
+const getMobileBeatLabels = (bar: SongBar, stringNames: string[], defaultBeatCount: number): string[] =>
+  getEditorBeatsForBar(bar, stringNames, defaultBeatCount).flatMap((beat) =>
+    getBeatPulseLabels(beat).map((label, pulseIndex) =>
+      pulseIndex === 0 ? String(beat.beatNumber) : `${beat.beatNumber}${label}`,
+    ),
   );
 
-const getMobileBeatLabels = (beatCount: number): string[] =>
-  Array.from({ length: normalizeBeatCount(beatCount) * SLOTS_PER_BEAT }, (_, index) =>
-    index % SLOTS_PER_BEAT === 0
-      ? String(Math.floor(index / SLOTS_PER_BEAT) + 1)
-      : `${Math.floor(index / SLOTS_PER_BEAT) + 1}&`,
-  );
+const getBarBeatCount = (bar: SongBar, stringNames: string[], defaultBeatCount: number): number =>
+  getSongBarBeatCountFromEvents(bar, stringNames, defaultBeatCount);
 
-const getRowSlotCount = (rowBars: ParsedBar[]): number =>
-  rowBars.reduce((sum, bar) => sum + getBarSlotCount(bar), 0);
+const getBarSlotCount = (bar: SongBar | undefined, stringNames: string[], defaultBeatCount: number): number => {
+  if (!bar) {
+    return getSlotsPerBar(defaultBeatCount);
+  }
 
-const getAbsoluteSlotIndexForBar = (rowBars: ParsedBar[], rowBarIndex: number, slotIndex: number): number => {
+  return getSongBarSlotCountFromEvents(bar, stringNames, defaultBeatCount);
+};
+
+const getRowSlotCount = (rowBars: SongBar[], stringNames: string[], defaultBeatCount: number): number =>
+  rowBars.reduce((sum, bar) => sum + getBarSlotCount(bar, stringNames, defaultBeatCount), 0);
+
+const getAbsoluteSlotIndexForBar = (
+  rowBars: SongBar[],
+  rowBarIndex: number,
+  slotIndex: number,
+  stringNames: string[],
+  defaultBeatCount: number,
+): number => {
   const safeRowBarIndex = Math.max(0, Math.min(rowBars.length - 1, rowBarIndex));
   const priorSlots = rowBars
     .slice(0, safeRowBarIndex)
-    .reduce((sum, bar) => sum + getBarSlotCount(bar), 0);
-  const barSlotCount = getBarSlotCount(rowBars[safeRowBarIndex]);
+    .reduce((sum, bar) => sum + getBarSlotCount(bar, stringNames, defaultBeatCount), 0);
+  const barSlotCount = getBarSlotCount(rowBars[safeRowBarIndex], stringNames, defaultBeatCount);
   const safeSlotIndex = Math.max(0, Math.min(barSlotCount - 1, slotIndex));
   return priorSlots + safeSlotIndex;
 };
 
 const getRowBarAndSlotFromAbsolute = (
-  rowBars: ParsedBar[],
+  rowBars: SongBar[],
   absoluteSlotIndex: number,
+  stringNames: string[],
+  defaultBeatCount: number,
 ): { rowBarIndex: number; slotIndex: number } => {
   if (rowBars.length === 0) {
     return { rowBarIndex: 0, slotIndex: 0 };
   }
 
-  const totalSlots = Math.max(1, getRowSlotCount(rowBars));
+  const totalSlots = Math.max(1, getRowSlotCount(rowBars, stringNames, defaultBeatCount));
   let remainingSlots = Math.max(0, Math.min(totalSlots - 1, absoluteSlotIndex));
 
   for (let rowBarIndex = 0; rowBarIndex < rowBars.length; rowBarIndex += 1) {
-    const barSlotCount = getBarSlotCount(rowBars[rowBarIndex]);
+    const barSlotCount = getBarSlotCount(rowBars[rowBarIndex], stringNames, defaultBeatCount);
     if (remainingSlots < barSlotCount) {
       return {
         rowBarIndex,
@@ -111,12 +162,89 @@ const getRowBarAndSlotFromAbsolute = (
   const fallbackBarIndex = rowBars.length - 1;
   return {
     rowBarIndex: fallbackBarIndex,
-    slotIndex: Math.max(0, getBarSlotCount(rowBars[fallbackBarIndex]) - 1),
+    slotIndex: Math.max(0, getBarSlotCount(rowBars[fallbackBarIndex], stringNames, defaultBeatCount) - 1),
   };
+};
+
+const createEmptyBar = (stringNames: string[], beatCount = DEFAULT_BEAT_COUNT): SongBar =>
+  projectEditorBarToSongBar(
+    {
+      beats: Array.from({ length: normalizeBeatCount(beatCount) }, (_, beatIndex) => ({
+        beatNumber: beatIndex + 1,
+        split: 2 as EditorBeatSplit,
+        pulseLabels: [],
+        segmentsByString: Object.fromEntries(
+          stringNames.map((stringName) => [
+            stringName,
+            [EDITOR_EMPTY_SLOT, EDITOR_EMPTY_SLOT],
+          ]),
+        ),
+      })),
+    },
+    stringNames,
+  );
+
+const cloneBar = (bar: SongBar, stringNames: string[], defaultBeatCount: number): SongBar =>
+  projectEditorBarToSongBar(projectSongBarToEditorBar(bar, stringNames, defaultBeatCount), stringNames);
+
+const updateBarCell = (
+  bars: SongBar[],
+  barIndex: number,
+  stringName: string,
+  slotIndex: number,
+  value: string,
+  stringNames: string[],
+  defaultBeatCount: number,
+): SongBar[] =>
+  bars.map((bar, currentBarIndex) => {
+    if (currentBarIndex !== barIndex) {
+      return bar;
+    }
+
+    const editorBar = projectSongBarToEditorBar(bar, stringNames, defaultBeatCount);
+    let remaining = Math.max(0, slotIndex);
+
+    for (let beatIndex = 0; beatIndex < editorBar.beats.length; beatIndex += 1) {
+      const beat = editorBar.beats[beatIndex];
+      if (remaining < beat.split) {
+        const nextSegments = [...(beat.segmentsByString[stringName] ?? Array.from({ length: beat.split }, () => EDITOR_EMPTY_SLOT))];
+        nextSegments[remaining] = normalizeEditorSlotToken(value);
+        beat.segmentsByString[stringName] = nextSegments;
+        break;
+      }
+      remaining -= beat.split;
+    }
+
+    return projectEditorBarToSongBar(editorBar, stringNames);
+  });
+
+const insertBar = (
+  bars: SongBar[],
+  index: number,
+  stringNames: string[],
+  sourceBar?: SongBar,
+  beatCount = DEFAULT_BEAT_COUNT,
+): SongBar[] => {
+  const nextBar = sourceBar ? cloneBar(sourceBar, stringNames, beatCount) : createEmptyBar(stringNames, beatCount);
+  return [
+    ...bars.slice(0, index),
+    nextBar,
+    ...bars.slice(index),
+  ];
+};
+
+const removeBar = (bars: SongBar[], index: number, stringNames: string[]): SongBar[] => {
+  if (bars.length === 1) {
+    return [createEmptyBar(stringNames)];
+  }
+
+  return bars.filter((_, currentIndex) => currentIndex !== index);
 };
 
 export function SectionEditorCard({
   section,
+  stringNamesOverride,
+  barsOverride,
   index,
   isFirst,
   isLast,
@@ -137,21 +265,56 @@ export function SectionEditorCard({
   const [activeRowIndex, setActiveRowIndex] = useState(-1);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [copiedBlock, setCopiedBlock] = useState<{
-    bars: ReturnType<typeof parseTab>['bars'];
+    bars: SongBar[];
     annotation: TabRowAnnotation;
   } | null>(null);
-  const [copiedBar, setCopiedBar] = useState<ParsedBar | null>(null);
+  const [copiedBar, setCopiedBar] = useState<SongBar | null>(null);
   const [renderMode, setRenderMode] = useState<TabPreviewRenderMode>('ascii');
   const [rowEditSnapshot, setRowEditSnapshot] = useState<{
     tab: string;
+    bars?: SongBar[];
+    stringNames?: string[];
     rowAnnotations?: TabRowAnnotation[];
     rowBarCounts?: number[];
   } | null>(null);
   const lastHandledSaveSignal = useRef(saveSignal);
   const inputRefs = useRef<Record<string, TextInput | null>>({});
   const quickPreviewRenderMode: TabPreviewRenderMode = !capabilities.svgEnabled ? 'ascii' : renderMode;
+  const effectiveDefaultBeatCount = normalizeBeatCount(section.defaultBeatCount ?? DEFAULT_BEAT_COUNT);
 
-  const { stringNames, bars } = useMemo(() => parseTab(section.tab), [section.tab]);
+  const parsedChart = useMemo(() => parseTab(section.tab), [section.tab]);
+  const stringNames = stringNamesOverride ?? parsedChart.stringNames;
+  const bars = useMemo<SongBar[]>(
+    () =>
+      (barsOverride ?? parsedChart.bars).map((barValue) => {
+        const bar = barValue as SongBar;
+        return {
+        ...(bar.beatCount !== undefined ? { beatCount: bar.beatCount } : {}),
+        ...(bar.note !== undefined ? { note: bar.note } : {}),
+        ...(Array.isArray(bar.events)
+          ? {
+              events: bar.events?.map((event) => ({
+                ...event,
+                pulseLabels: [...event.pulseLabels],
+                cells: Object.fromEntries(
+                  stringNames.map((stringName) => [
+                    stringName,
+                    (event.cells[stringName] ?? []).map((cell) => ({
+                      text: cell.text,
+                      segments: [...cell.segments],
+                    })),
+                  ]),
+                ),
+              })),
+            }
+          : {}),
+        cells: Object.fromEntries(
+          stringNames.map((stringName) => [stringName, [...(bar.cells[stringName] ?? [])]]),
+        ),
+      };
+      }),
+    [barsOverride, parsedChart.bars, stringNames],
+  );
   const rowBarCounts = useMemo(
     () => normalizeRowBarCounts(bars.length, section.rowBarCounts),
     [bars.length, section.rowBarCounts],
@@ -190,18 +353,24 @@ export function SectionEditorCard({
     [bars, rowAnnotations, rowBarCounts],
   );
 
-  const commitBars = (nextBars: ReturnType<typeof parseTab>['bars']) => {
-    onChange({ tab: renderTab(stringNames, nextBars) });
+  const commitBars = (nextBars: SongBar[]) => {
+    onChange({
+      tab: renderTab(stringNames, nextBars as ParsedBar[]),
+      bars: nextBars,
+      stringNames,
+    });
   };
 
   const commitChart = (
-    nextBars: ReturnType<typeof parseTab>['bars'],
+    nextBars: SongBar[],
     nextRowAnnotations = rowAnnotations,
     nextRowBarCounts = rowBarCounts,
   ) => {
-    const nextTab = renderTab(stringNames, nextBars);
+    const nextTab = renderTab(stringNames, nextBars as ParsedBar[]);
     onChange({
       tab: nextTab,
+      bars: nextBars,
+      stringNames,
       rowAnnotations: nextRowAnnotations,
       rowBarCounts: normalizeRowBarCounts(nextBars.length, nextRowBarCounts),
     });
@@ -227,6 +396,8 @@ export function SectionEditorCard({
     const { rowBarIndex: nextBarIndex, slotIndex: nextSlotIndex } = getRowBarAndSlotFromAbsolute(
       nextRow.bars,
       slotIndex,
+      stringNames,
+      effectiveDefaultBeatCount,
     );
     const key = getCellKey(
       clampedRowIndex,
@@ -245,7 +416,7 @@ export function SectionEditorCard({
     slotIndex: number,
     value: string,
   ) => {
-    commitBars(updateBarCell(bars, barIndex, stringName, slotIndex, value));
+    commitBars(updateBarCell(bars, barIndex, stringName, slotIndex, value, stringNames, effectiveDefaultBeatCount));
   };
 
   const handleCellKeyPress = (
@@ -258,7 +429,13 @@ export function SectionEditorCard({
   ) => {
     const key = event.nativeEvent.key;
     const rowBars = rowSlices[rowIndex]?.bars ?? [];
-    const globalSlotIndex = getAbsoluteSlotIndexForBar(rowBars, rowBarIndex, slotIndex);
+    const globalSlotIndex = getAbsoluteSlotIndexForBar(
+      rowBars,
+      rowBarIndex,
+      slotIndex,
+      stringNames,
+      effectiveDefaultBeatCount,
+    );
 
     if (key === 'ArrowRight') {
       focusCell(rowIndex, stringIndex, globalSlotIndex + 1);
@@ -293,6 +470,8 @@ export function SectionEditorCard({
   const beginRowEdit = (rowIndex: number) => {
     setRowEditSnapshot({
       tab: section.tab,
+      bars: bars.map((bar) => cloneBar(bar, stringNames, effectiveDefaultBeatCount)),
+      stringNames: [...stringNames],
       rowAnnotations: section.rowAnnotations?.map((annotation) => ({ ...annotation })),
       rowBarCounts: section.rowBarCounts ? [...section.rowBarCounts] : undefined,
     });
@@ -308,6 +487,8 @@ export function SectionEditorCard({
     if (rowEditSnapshot) {
       onChange({
         tab: rowEditSnapshot.tab,
+        bars: rowEditSnapshot.bars,
+        stringNames: rowEditSnapshot.stringNames,
         rowAnnotations: rowEditSnapshot.rowAnnotations,
         rowBarCounts: rowEditSnapshot.rowBarCounts,
       });
@@ -409,11 +590,35 @@ export function SectionEditorCard({
               const duplicateRow = () => {
                 setCopiedBlock({
                   bars: row.bars.map((bar) => ({
-                    beatCount: getBarBeatCount(bar),
+                    beatCount: getBarBeatCount(bar, stringNames, effectiveDefaultBeatCount),
+                    ...(bar.note !== undefined ? { note: bar.note } : {}),
+                    ...(Array.isArray(bar.events)
+                      ? {
+                          events: bar.events.map((event) => ({
+                            ...event,
+                            pulseLabels: [...event.pulseLabels],
+                            cells: Object.fromEntries(
+                              stringNames.map((stringName) => [
+                                stringName,
+                                (event.cells[stringName] ?? []).map((cell) => ({
+                                  text: cell.text,
+                                  segments: [...cell.segments],
+                                })),
+                              ]),
+                            ),
+                          })),
+                        }
+                      : {}),
                     cells: Object.fromEntries(
                       stringNames.map((stringName) => [
                         stringName,
-                        [...(bar.cells[stringName] ?? Array.from({ length: getBarSlotCount(bar) }, () => '-'))],
+                        [
+                          ...(bar.cells[stringName] ??
+                            Array.from(
+                              { length: getBarSlotCount(bar, stringNames, effectiveDefaultBeatCount) },
+                              () => EDITOR_EMPTY_SLOT,
+                            )),
+                        ],
                       ]),
                     ),
                   })),
@@ -460,13 +665,32 @@ export function SectionEditorCard({
                   }
 
                   return {
-                    beatCount: getBarBeatCount(bar),
+                    beatCount: getBarBeatCount(bar, stringNames, effectiveDefaultBeatCount),
+                    ...(bar.note !== undefined ? { note: bar.note } : {}),
                     cells: Object.fromEntries(
                       stringNames.map((stringName) => [
                         stringName,
-                        Array.from({ length: getBarSlotCount(bar) }, () => '-'),
+                        Array.from(
+                          { length: getBarSlotCount(bar, stringNames, effectiveDefaultBeatCount) },
+                          () => EDITOR_EMPTY_SLOT,
+                        ),
                       ]),
                     ),
+                    events: projectEditorBarToSongBar(
+                      {
+                        note: bar.note,
+                        beats: getEditorBeatsForBar(bar, stringNames, effectiveDefaultBeatCount).map((beat) => ({
+                          ...beat,
+                          segmentsByString: Object.fromEntries(
+                            stringNames.map((stringName) => [
+                              stringName,
+                              Array.from({ length: beat.split }, () => EDITOR_EMPTY_SLOT),
+                            ]),
+                          ),
+                        })),
+                      },
+                      stringNames,
+                    ).events,
                   };
                 });
 
@@ -475,7 +699,7 @@ export function SectionEditorCard({
               const insertRowAfter = () => {
                 let nextBars = bars;
                 const insertIndex = row.startBarIndex + row.bars.length;
-                const defaultBeatCount = normalizeBeatCount(section.defaultBeatCount ?? DEFAULT_BEAT_COUNT);
+                const defaultBeatCount = effectiveDefaultBeatCount;
 
                 for (let index = 0; index < barsPerRow; index += 1) {
                   nextBars = insertBar(
@@ -501,7 +725,7 @@ export function SectionEditorCard({
               };
               const updateRowBarCount = (value: string) => {
                 const nextCount = Math.max(1, Math.min(8, Number(value.replace(/[^0-9]/g, '')) || 1));
-                const defaultBeatCount = normalizeBeatCount(section.defaultBeatCount ?? DEFAULT_BEAT_COUNT);
+                const defaultBeatCount = effectiveDefaultBeatCount;
 
                 if (nextCount === row.barCount) {
                   return;
@@ -717,7 +941,7 @@ export function SectionEditorCard({
                   {activeRowIndex === row.rowIndex ? (
                     <RowEditor
                       sectionId={section.id}
-                      defaultBeatCount={normalizeBeatCount(section.defaultBeatCount ?? DEFAULT_BEAT_COUNT)}
+                      defaultBeatCount={effectiveDefaultBeatCount}
                       stringNames={stringNames}
                       row={row}
                       bars={bars}
@@ -836,11 +1060,11 @@ interface RowEditorProps {
   row: {
     rowIndex: number;
     startBarIndex: number;
-    bars: ReturnType<typeof parseTab>['bars'];
+    bars: SongBar[];
     annotation: TabRowAnnotation;
     barCount: number;
   };
-  bars: ReturnType<typeof parseTab>['bars'];
+  bars: SongBar[];
   rowAnnotations: TabRowAnnotation[];
   rowBarCounts: number[];
   inputRefs: MutableRefObject<Record<string, TextInput | null>>;
@@ -851,9 +1075,9 @@ interface RowEditorProps {
     field: keyof TabRowAnnotation,
     value: string,
   ) => void;
-  onBarsChange: (bars: ReturnType<typeof parseTab>['bars']) => void;
+  onBarsChange: (bars: SongBar[]) => void;
   onChartChange: (
-    bars: ReturnType<typeof parseTab>['bars'],
+    bars: SongBar[],
     rowAnnotations?: TabRowAnnotation[],
     rowBarCounts?: number[],
   ) => void;
@@ -871,8 +1095,8 @@ interface RowEditorProps {
     slotIndex: number,
     currentValue: string,
   ) => void;
-  copiedBar: ParsedBar | null;
-  onCopyBar: (bar: ParsedBar | null) => void;
+  copiedBar: SongBar | null;
+  onCopyBar: (bar: SongBar | null) => void;
 }
 
 function RowEditor({
@@ -916,14 +1140,15 @@ function RowEditor({
     slotIndex: number;
   } | null>(null);
   const [activeBarIndex, setActiveBarIndex] = useState(0);
+  const [activeBeatIndex, setActiveBeatIndex] = useState(0);
   const [showExtendedFretPad, setShowExtendedFretPad] = useState(false);
   const rowBarWidths = useMemo(
     () =>
       row.bars.map((bar) => {
-        const slotCount = getBarSlotCount(bar);
+        const slotCount = getBarSlotCount(bar, stringNames, defaultBeatCount);
         return cellSize * slotCount + cellGap * (slotCount - 1) + barPadding * 2;
       }),
-    [barPadding, cellGap, cellSize, row.bars],
+    [barPadding, cellGap, cellSize, defaultBeatCount, row.bars, stringNames],
   );
 
 
@@ -970,13 +1195,19 @@ function RowEditor({
   }, [row.bars.length]);
 
   useEffect(() => {
+    const selectedBar = row.bars[activeBarIndex] ?? row.bars[0];
+    const beatCount = getEditorBeatsForBar(selectedBar, stringNames, defaultBeatCount).length;
+    setActiveBeatIndex((current) => Math.max(0, Math.min(Math.max(beatCount - 1, 0), current)));
+  }, [activeBarIndex, defaultBeatCount, row.bars, stringNames]);
+
+  useEffect(() => {
     setSelectedCell((currentCell) => {
       if (!currentCell) {
         return currentCell;
       }
 
       const safeRowBarIndex = Math.max(0, Math.min(row.bars.length - 1, currentCell.rowBarIndex));
-      const safeBarSlotCount = getBarSlotCount(row.bars[safeRowBarIndex]);
+      const safeBarSlotCount = getBarSlotCount(row.bars[safeRowBarIndex], stringNames, defaultBeatCount);
       const safeSlotIndex = Math.max(0, Math.min(safeBarSlotCount - 1, currentCell.slotIndex));
       const safeStringIndex = Math.max(0, Math.min(stringNames.length - 1, currentCell.stringIndex));
 
@@ -1016,7 +1247,7 @@ function RowEditor({
       }
 
       const safeStringIndex = Math.max(0, Math.min(stringNames.length - 1, currentCell?.stringIndex ?? 0));
-      const barSlotCount = getBarSlotCount(row.bars[nextBarIndex]);
+      const barSlotCount = getBarSlotCount(row.bars[nextBarIndex], stringNames, defaultBeatCount);
       const safeSlotIndex = Math.max(0, Math.min(barSlotCount - 1, currentCell?.slotIndex ?? 0));
 
       return {
@@ -1036,13 +1267,25 @@ function RowEditor({
       }
 
       return {
-        beatCount: getBarBeatCount(bar),
+        beatCount: getBarBeatCount(bar, stringNames, defaultBeatCount),
         cells: Object.fromEntries(
           stringNames.map((stringName) => [
             stringName,
-            Array.from({ length: getBarSlotCount(bar) }, () => '-'),
+            Array.from({ length: getBarSlotCount(bar, stringNames, defaultBeatCount) }, () => EDITOR_EMPTY_SLOT),
           ]),
         ),
+        events: projectEditorBarToSongBar(
+          {
+            note: bar.note,
+            beats: getEditorBeatsForBar(bar, stringNames, defaultBeatCount).map((beat) => ({
+              ...beat,
+              segmentsByString: Object.fromEntries(
+                stringNames.map((stringName) => [stringName, Array.from({ length: beat.split }, () => EDITOR_EMPTY_SLOT)]),
+              ),
+            })),
+          },
+          stringNames,
+        ).events,
       };
     });
 
@@ -1084,30 +1327,23 @@ function RowEditor({
     onChartChange(nextBars, nextRowAnnotations, nextRowBarCounts);
   };
 
-  const replaceBar = (barIndex: number, nextBar: ParsedBar) => {
+  const replaceBar = (barIndex: number, nextBar: SongBar) => {
     const nextBars = bars.map((bar, currentBarIndex) => {
       if (currentBarIndex !== barIndex) {
         return bar;
       }
 
-      return cloneBar(nextBar);
+      return cloneBar(nextBar, stringNames, defaultBeatCount);
     });
 
     onBarsChange(nextBars);
   };
 
-  const cloneBar = (bar: ParsedBar): ParsedBar => ({
-    beatCount: getBarBeatCount(bar),
-    cells: Object.fromEntries(
-      stringNames.map((stringName) => [
-        stringName,
-        [...(bar.cells[stringName] ?? Array.from({ length: getBarSlotCount(bar) }, () => '-'))],
-      ]),
-    ),
-  });
+  const cloneBarForClipboard = (bar: SongBar): SongBar =>
+    cloneBar(bar, stringNames, defaultBeatCount);
 
   const commitRowMutation = (
-    nextBars: ReturnType<typeof parseTab>['bars'],
+    nextBars: SongBar[],
     nextCount: number,
     nextSelectedBarIndex: number,
     nextBarNotes?: string[],
@@ -1129,8 +1365,14 @@ function RowEditor({
       return;
     }
 
-    const slotsPerRow = getRowSlotCount(row.bars);
-    const currentCellAbsoluteSlot = getAbsoluteSlotIndexForBar(row.bars, selectedCell.rowBarIndex, selectedCell.slotIndex);
+    const slotsPerRow = getRowSlotCount(row.bars, stringNames, defaultBeatCount);
+    const currentCellAbsoluteSlot = getAbsoluteSlotIndexForBar(
+      row.bars,
+      selectedCell.rowBarIndex,
+      selectedCell.slotIndex,
+      stringNames,
+      defaultBeatCount,
+    );
     const currentIndex = selectedCell.stringIndex * slotsPerRow + currentCellAbsoluteSlot;
     const nextIndex = Math.max(0, Math.min(stringNames.length * slotsPerRow - 1, currentIndex + direction));
     const nextStringIndex = Math.floor(nextIndex / slotsPerRow);
@@ -1138,6 +1380,8 @@ function RowEditor({
     const { rowBarIndex: nextRowBarIndex, slotIndex: nextSlotIndex } = getRowBarAndSlotFromAbsolute(
       row.bars,
       withinStringIndex,
+      stringNames,
+      defaultBeatCount,
     );
 
     setSelectedCell({
@@ -1152,15 +1396,16 @@ function RowEditor({
 
   const selectedBar = row.bars[activeBarIndex] ?? row.bars[0];
   const selectedGlobalBarIndex = row.startBarIndex + activeBarIndex;
-  const selectedBarBeatCount = getBarBeatCount(selectedBar);
+  const selectedBarBeatCount = getBarBeatCount(selectedBar, stringNames, defaultBeatCount);
+  const selectedBarBeats = getEditorBeatsForBar(selectedBar, stringNames, defaultBeatCount);
   const displayBeatLabels = useMobileCellEditor
-    ? getMobileBeatLabels(selectedBarBeatCount)
-    : getBeatLabels(selectedBarBeatCount);
+    ? getMobileBeatLabels(selectedBar, stringNames, defaultBeatCount)
+    : getBeatLabels(selectedBar, stringNames, defaultBeatCount);
   const visibleFretOptions = showExtendedFretPad ? extendedFretOptions : baseFretOptions;
   const selectedCellValue =
     selectedCell
-      ? row.bars[selectedCell.rowBarIndex]?.cells[selectedCell.stringName]?.[selectedCell.slotIndex] ?? '-'
-      : '-';
+      ? row.bars[selectedCell.rowBarIndex]?.cells[selectedCell.stringName]?.[selectedCell.slotIndex] ?? EDITOR_EMPTY_SLOT
+      : EDITOR_EMPTY_SLOT;
 
   const moveSelectedBar = (direction: -1 | 1) => {
     const nextBarIndex = activeBarIndex + direction;
@@ -1198,38 +1443,83 @@ function RowEditor({
     const globalBarIndex = row.startBarIndex + rowBarIndex;
     const targetBar = bars[globalBarIndex];
 
-    if (!targetBar || getBarBeatCount(targetBar) === normalizedNextBeatCount) {
+    if (!targetBar || getBarBeatCount(targetBar, stringNames, defaultBeatCount) === normalizedNextBeatCount) {
       return;
     }
 
-    const nextSlotCount = getSlotsPerBar(normalizedNextBeatCount);
     const nextBars = bars.map((bar, currentIndex) => {
       if (currentIndex !== globalBarIndex) {
         return bar;
       }
 
-      return {
-        ...bar,
-        beatCount: normalizedNextBeatCount,
-        cells: Object.fromEntries(
-          stringNames.map((stringName) => [
-            stringName,
-            [...(bar.cells[stringName] ?? [])]
-              .slice(0, nextSlotCount)
-              .concat(
-                Array.from(
-                  {
-                    length: Math.max(0, nextSlotCount - (bar.cells[stringName] ?? []).length),
-                  },
-                  () => '-',
-                ),
-              ),
-          ]),
-        ),
-      };
+      const editorBar = projectSongBarToEditorBar(bar, stringNames, defaultBeatCount);
+      const nextBeats = editorBar.beats
+        .slice(0, normalizedNextBeatCount)
+        .map((beat, beatIndex) => ({ ...beat, beatNumber: beatIndex + 1 }));
+
+      while (nextBeats.length < normalizedNextBeatCount) {
+        nextBeats.push({
+          beatNumber: nextBeats.length + 1,
+          split: 2,
+          pulseLabels: [],
+          segmentsByString: Object.fromEntries(
+            stringNames.map((stringName) => [stringName, [EDITOR_EMPTY_SLOT, EDITOR_EMPTY_SLOT]]),
+          ),
+        });
+      }
+
+      return projectEditorBarToSongBar(
+        {
+          note: bar.note,
+          beats: nextBeats,
+        },
+        stringNames,
+      );
     });
 
     onChartChange(nextBars, rowAnnotations, rowBarCounts);
+  };
+
+  const updateBeatSplitAt = (
+    rowBarIndex: number,
+    beatIndex: number,
+    nextSplit: EditorBeatSplit,
+  ) => {
+    const globalBarIndex = row.startBarIndex + rowBarIndex;
+    const targetBar = bars[globalBarIndex];
+    if (!targetBar) {
+      return;
+    }
+
+    const editorBar = projectSongBarToEditorBar(targetBar, stringNames, defaultBeatCount);
+    const beat = editorBar.beats[beatIndex];
+    if (!beat || beat.split === nextSplit) {
+      return;
+    }
+
+    const updatedBeat: EditorBeat = {
+      ...beat,
+      split: nextSplit,
+      pulseLabels: getBeatPulseLabels({ ...beat, split: nextSplit }).slice(0, nextSplit),
+      segmentsByString: Object.fromEntries(
+        stringNames.map((stringName) => {
+          const current = beat.segmentsByString[stringName] ?? [];
+          const next = current.slice(0, nextSplit).map((segment) => normalizeEditorSlotToken(segment));
+          while (next.length < nextSplit) {
+            next.push(EDITOR_EMPTY_SLOT);
+          }
+          return [stringName, next];
+        }),
+      ),
+    };
+
+    editorBar.beats[beatIndex] = updatedBeat;
+    const nextBars = bars.map((bar, currentIndex) =>
+      currentIndex === globalBarIndex
+        ? projectEditorBarToSongBar(editorBar, stringNames)
+        : bar,
+    );
+    onBarsChange(nextBars);
   };
 
   const insertAfterSelectedBar = () => {
@@ -1322,7 +1612,7 @@ function RowEditor({
         />
         <PrimaryButton
           label={useMobileCellEditor ? 'Copy' : '⎘ Copy'}
-          onPress={() => onCopyBar(cloneBar(selectedBar))}
+          onPress={() => onCopyBar(cloneBarForClipboard(selectedBar))}
           variant="ghost"
           size="compact"
           style={[
@@ -1371,6 +1661,43 @@ function RowEditor({
       </View>
     </View>
   );
+
+  const renderBeatSplitControl = () => {
+    if (!selectedBarBeats[activeBeatIndex]) {
+      return null;
+    }
+
+    const selectedBeat = selectedBarBeats[activeBeatIndex];
+
+    return (
+      <View style={styles.beatSplitPanel}>
+        <Text style={styles.beatSplitLabel}>
+          Split beat {selectedBeat.beatNumber}
+        </Text>
+        <View style={styles.beatSplitPills}>
+          {[2, 3, 4].map((split) => (
+            <Pressable
+              key={`beat-split-${split}`}
+              onPress={() => updateBeatSplitAt(activeBarIndex, activeBeatIndex, split as EditorBeatSplit)}
+              style={[
+                styles.beatSplitPill,
+                selectedBeat.split === split && styles.beatSplitPillActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.beatSplitPillText,
+                  selectedBeat.split === split && styles.beatSplitPillTextActive,
+                ]}
+              >
+                {split}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    );
+  };
 
   const renderBarSelector = () => (
     <View style={styles.barSelectorPanel}>
@@ -1480,6 +1807,7 @@ function RowEditor({
       {useMobileCellEditor ? renderBarSelector() : null}
 
       {selectedBar ? renderSelectedBarToolbar() : null}
+      {selectedBar ? renderBeatSplitControl() : null}
 
       <AnnotationField
         label="Before Row"
@@ -1513,15 +1841,33 @@ function RowEditor({
                     onSelect={(value) => updateBarBeatCountAt(activeBarIndex, value)}
                   />
                   <Text style={styles.barBlockTitle}>Bar {selectedGlobalBarIndex + 1}</Text>
-                  <View style={[styles.beatRow, { gap: cellGap }]}>
-                    {displayBeatLabels.map((label) => (
-                      <View
-                        key={`${sectionId}-row-${row.rowIndex}-mobile-beat-${activeBarIndex}-${label}`}
-                        style={[styles.beatCell, { width: cellSize }]}
-                      >
-                        <Text style={styles.beatLabel}>{label}</Text>
-                      </View>
-                    ))}
+                  <View style={[styles.beatGroupRow, { gap: cellGap }]}>
+                    {selectedBarBeats.map((beat, beatIndex) => {
+                      const beatWidth = cellSize * beat.split + cellGap * (beat.split - 1);
+                      return (
+                        <Pressable
+                          key={`${sectionId}-row-${row.rowIndex}-mobile-beat-${activeBarIndex}-${beat.beatNumber}`}
+                          onPress={() => setActiveBeatIndex(beatIndex)}
+                          style={[
+                            styles.beatGroup,
+                            { width: beatWidth },
+                            activeBeatIndex === beatIndex && styles.beatGroupActive,
+                          ]}
+                        >
+                          <Text style={styles.beatGroupTitle}>{beat.beatNumber}</Text>
+                          <View style={[styles.beatRow, { gap: cellGap }]}>
+                            {getBeatPulseLabels(beat).map((label, pulseIndex) => (
+                              <View
+                                key={`${sectionId}-row-${row.rowIndex}-mobile-beat-${activeBarIndex}-${beat.beatNumber}-${pulseIndex}`}
+                                style={[styles.beatCell, { width: cellSize }]}
+                              >
+                                <Text style={styles.beatLabel}>{label}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 </View>
               </View>
@@ -1541,35 +1887,60 @@ function RowEditor({
                       { width: rowBarWidths[activeBarIndex] ?? defaultBarWidth, padding: barPadding },
                     ]}
                   >
-                    <View style={[styles.slotRow, { gap: cellGap }]}>
-                      {(selectedBar.cells[stringName] ?? [])
-                        .slice(0, getBarSlotCount(selectedBar))
-                        .map((cellValue, slotIndex) => (
-                        <Pressable
-                          key={`${sectionId}-mobile-cell-${selectedGlobalBarIndex}-${stringName}-${slotIndex}`}
-                          onPress={() =>
-                            setSelectedCell({
-                              globalBarIndex: selectedGlobalBarIndex,
-                              rowBarIndex: activeBarIndex,
-                              stringName,
-                              stringIndex,
-                              slotIndex,
-                            })
-                          }
-                          style={[
-                            styles.slotButton,
-                            { width: cellSize, minHeight: cellSize + 2 },
-                            selectedCell?.globalBarIndex === selectedGlobalBarIndex &&
-                            selectedCell?.stringName === stringName &&
-                            selectedCell?.slotIndex === slotIndex &&
-                            styles.slotButtonActive,
-                          ]}
-                        >
-                          <Text style={styles.slotButtonLabel}>
-                            {cellValue === '-' ? '-' : cellValue}
-                          </Text>
-                        </Pressable>
-                        ))}
+                    <View style={[styles.beatGroupRow, { gap: cellGap }]}>
+                      {(() => {
+                        let slotOffset = 0;
+                        return selectedBarBeats.map((beat, beatIndex) => {
+                          const beatWidth = cellSize * beat.split + cellGap * (beat.split - 1);
+                          const startSlot = slotOffset;
+                          slotOffset += beat.split;
+                          const segments = beat.segmentsByString[stringName] ?? Array.from({ length: beat.split }, () => EDITOR_EMPTY_SLOT);
+
+                          return (
+                            <Pressable
+                              key={`${sectionId}-mobile-segment-group-${selectedGlobalBarIndex}-${stringName}-${beat.beatNumber}`}
+                              onPress={() => setActiveBeatIndex(beatIndex)}
+                              style={[
+                                styles.beatGroup,
+                                { width: beatWidth },
+                                activeBeatIndex === beatIndex && styles.beatGroupActive,
+                              ]}
+                            >
+                              <View style={[styles.slotRow, { gap: cellGap }]}>
+                                {segments.map((cellValue, pulseIndex) => {
+                                  const slotIndex = startSlot + pulseIndex;
+                                  return (
+                                    <Pressable
+                                      key={`${sectionId}-mobile-cell-${selectedGlobalBarIndex}-${stringName}-${slotIndex}`}
+                                      onPress={() =>
+                                        setSelectedCell({
+                                          globalBarIndex: selectedGlobalBarIndex,
+                                          rowBarIndex: activeBarIndex,
+                                          stringName,
+                                          stringIndex,
+                                          slotIndex,
+                                        })
+                                      }
+                                      style={[
+                                        styles.slotButton,
+                                        { width: cellSize, minHeight: cellSize + 2 },
+                                        selectedCell?.globalBarIndex === selectedGlobalBarIndex &&
+                                        selectedCell?.stringName === stringName &&
+                                        selectedCell?.slotIndex === slotIndex &&
+                                        styles.slotButtonActive,
+                                      ]}
+                                    >
+                                      <Text style={styles.slotButtonLabel}>
+                                        {cellValue === EDITOR_EMPTY_SLOT ? EDITOR_EMPTY_SLOT : cellValue}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            </Pressable>
+                          );
+                        });
+                      })()}
                     </View>
                   </View>
                 </View>
@@ -1584,7 +1955,7 @@ function RowEditor({
                   {`${selectedCell.stringName} string • Bar ${selectedCell.globalBarIndex + 1} • Beat ${displayBeatLabels[selectedCell.slotIndex]}`}
                 </Text>
                 <Text style={styles.mobilePadValue}>
-                  {selectedCellValue === '-' ? 'Empty' : `Fret ${selectedCellValue}`}
+                  {selectedCellValue === EDITOR_EMPTY_SLOT ? 'Empty' : `Fret ${selectedCellValue}`}
                 </Text>
               </View>
               <View style={styles.mobilePadActions}>
@@ -1673,8 +2044,8 @@ function RowEditor({
             <View style={styles.gridRow}>
               <View style={styles.labelCell} />
               {row.bars.map((bar, rowBarIndex) => {
-                const beatCount = getBarBeatCount(bar);
-                const beatLabels = getBeatLabels(beatCount);
+                const beatCount = getBarBeatCount(bar, stringNames, defaultBeatCount);
+                const beats = getEditorBeatsForBar(bar, stringNames, defaultBeatCount);
                 const barWidth = rowBarWidths[rowBarIndex] ?? defaultBarWidth;
 
                 return (
@@ -1700,15 +2071,36 @@ function RowEditor({
                   />
                   <Pressable onPress={() => selectBar(rowBarIndex)} style={styles.barHeaderPressable}>
                     <Text style={styles.barBlockTitle}>Bar {row.startBarIndex + rowBarIndex + 1}</Text>
-                    <View style={[styles.beatRow, { gap: cellGap }]}>
-                      {beatLabels.map((label) => (
-                        <View
-                          key={`${sectionId}-row-${row.rowIndex}-beat-${rowBarIndex}-${label}`}
-                          style={[styles.beatCell, { width: cellSize }]}
-                        >
-                          <Text style={styles.beatLabel}>{label}</Text>
-                        </View>
-                      ))}
+                    <View style={[styles.beatGroupRow, { gap: cellGap }]}>
+                      {beats.map((beat, beatIndex) => {
+                        const beatWidth = cellSize * beat.split + cellGap * (beat.split - 1);
+                        return (
+                          <Pressable
+                            key={`${sectionId}-row-${row.rowIndex}-beat-${rowBarIndex}-${beat.beatNumber}`}
+                            onPress={() => {
+                              selectBar(rowBarIndex);
+                              setActiveBeatIndex(beatIndex);
+                            }}
+                            style={[
+                              styles.beatGroup,
+                              { width: beatWidth },
+                              rowBarIndex === activeBarIndex && activeBeatIndex === beatIndex && styles.beatGroupActive,
+                            ]}
+                          >
+                            <Text style={styles.beatGroupTitle}>{beat.beatNumber}</Text>
+                            <View style={[styles.beatRow, { gap: cellGap }]}>
+                              {getBeatPulseLabels(beat).map((label, pulseIndex) => (
+                                <View
+                                  key={`${sectionId}-row-${row.rowIndex}-beat-${rowBarIndex}-${beat.beatNumber}-${pulseIndex}`}
+                                  style={[styles.beatCell, { width: cellSize }]}
+                                >
+                                  <Text style={styles.beatLabel}>{label}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   </Pressable>
                 </View>
@@ -1728,7 +2120,7 @@ function RowEditor({
                 {row.bars.map((bar, rowBarIndex) => {
                   const globalBarIndex = row.startBarIndex + rowBarIndex;
                   const barWidth = rowBarWidths[rowBarIndex] ?? defaultBarWidth;
-                  const visibleCells = (bar.cells[stringName] ?? []).slice(0, getBarSlotCount(bar));
+                  const beats = getEditorBeatsForBar(bar, stringNames, defaultBeatCount);
 
                   return (
                     <View
@@ -1739,46 +2131,77 @@ function RowEditor({
                         { width: barWidth, padding: barPadding },
                       ]}
                     >
-                      <View style={[styles.slotRow, { gap: cellGap }]}>
-                        {visibleCells.map((cellValue, slotIndex) => {
-                          const cellKey = getCellKey(
-                            row.rowIndex,
-                            rowBarIndex,
-                            stringIndex,
-                            slotIndex,
-                          );
+                      <View style={[styles.beatGroupRow, { gap: cellGap }]}>
+                        {(() => {
+                          let slotOffset = 0;
+                          return beats.map((beat, beatIndex) => {
+                            const beatWidth = cellSize * beat.split + cellGap * (beat.split - 1);
+                            const startSlot = slotOffset;
+                            slotOffset += beat.split;
+                            const segments = beat.segmentsByString[stringName] ?? Array.from({ length: beat.split }, () => EDITOR_EMPTY_SLOT);
 
-                          return (
-                            <TextInput
-                              key={cellKey}
-                              ref={(element) => {
-                                inputRefs.current[cellKey] = element;
-                              }}
-                              value={toEditableCellValue(cellValue)}
-                              onChangeText={(value) =>
-                                onCellChange(globalBarIndex, stringName, slotIndex, value)
-                              }
-                              onFocus={() => selectBar(rowBarIndex)}
-                              onKeyPress={(event) =>
-                                onCellKeyPress(
-                                  event,
-                                  row.rowIndex,
-                                  rowBarIndex,
-                                  stringIndex,
-                                  slotIndex,
-                                  toEditableCellValue(cellValue),
-                                )
-                              }
-                              maxLength={2}
-                              autoCapitalize="none"
-                              autoCorrect={false}
-                              spellCheck={false}
-                              style={[styles.slotInput, { width: cellSize, minHeight: cellSize + 2 }]}
-                              placeholder="-"
-                              placeholderTextColor={palette.textMuted}
-                            />
-                          );
-                        })}
+                            return (
+                              <Pressable
+                                key={`${sectionId}-bar-grid-${globalBarIndex}-${stringName}-beat-${beat.beatNumber}`}
+                                onPress={() => {
+                                  selectBar(rowBarIndex);
+                                  setActiveBeatIndex(beatIndex);
+                                }}
+                                style={[
+                                  styles.beatGroup,
+                                  { width: beatWidth },
+                                  rowBarIndex === activeBarIndex && activeBeatIndex === beatIndex && styles.beatGroupActive,
+                                ]}
+                              >
+                                <View style={[styles.slotRow, { gap: cellGap }]}>
+                                  {segments.map((cellValue, pulseIndex) => {
+                                    const slotIndex = startSlot + pulseIndex;
+                                    const cellKey = getCellKey(
+                                      row.rowIndex,
+                                      rowBarIndex,
+                                      stringIndex,
+                                      slotIndex,
+                                    );
+
+                                    return (
+                                      <TextInput
+                                        key={cellKey}
+                                        ref={(element) => {
+                                          inputRefs.current[cellKey] = element;
+                                        }}
+                                        value={toEditableCellValue(cellValue)}
+                                        onChangeText={(value) =>
+                                          onCellChange(globalBarIndex, stringName, slotIndex, value)
+                                        }
+                                        onFocus={() => {
+                                          selectBar(rowBarIndex);
+                                          setActiveBeatIndex(beatIndex);
+                                        }}
+                                        onKeyPress={(event) =>
+                                          onCellKeyPress(
+                                            event,
+                                            row.rowIndex,
+                                            rowBarIndex,
+                                            stringIndex,
+                                            slotIndex,
+                                            toEditableCellValue(cellValue),
+                                          )
+                                        }
+                                        maxLength={2}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                        spellCheck={false}
+                                        style={[styles.slotInput, { width: cellSize, minHeight: cellSize + 2 }]}
+                                        placeholder={EDITOR_EMPTY_SLOT}
+                                        placeholderTextColor={palette.textMuted}
+                                      />
+                                    );
+                                  })}
+                                </View>
+                              </Pressable>
+                            );
+                          });
+                        })()}
                       </View>
                     </View>
                   );
@@ -2171,11 +2594,11 @@ const getCellKey = (
 ) => `${rowIndex}-${rowBarIndex}-${stringIndex}-${slotIndex}`;
 
 const toEditableCellValue = (value: string) => {
-  if (!value || value === '-') {
+  if (!value || value === '-' || value === EDITOR_EMPTY_SLOT) {
     return '';
   }
 
-  return value.replace(/-+$/g, '');
+  return value;
 };
 
 const styles = StyleSheet.create({
@@ -2740,6 +3163,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: palette.textMuted,
   },
+  beatGroupRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  beatGroup: {
+    gap: 2,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: 8,
+    paddingVertical: 2,
+  },
+  beatGroupActive: {
+    borderColor: palette.primary,
+    backgroundColor: '#f0fdfa',
+  },
+  beatGroupTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: palette.textMuted,
+    textAlign: 'center',
+  },
   beatRow: {
     flexDirection: 'row',
   },
@@ -2909,6 +3353,46 @@ const styles = StyleSheet.create({
     minHeight: 34,
     paddingHorizontal: 8,
     textAlign: 'center',
+  },
+  beatSplitPanel: {
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  beatSplitLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  beatSplitPills: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  beatSplitPill: {
+    minWidth: 30,
+    minHeight: 26,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  beatSplitPillActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primaryMuted,
+  },
+  beatSplitPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  beatSplitPillTextActive: {
+    color: palette.primary,
   },
   barFooterSpacer: {
     height: 2,

@@ -15,9 +15,9 @@ import { useSubscription, useUpgradePrompt } from '../features/subscription';
 import { useAuth } from '../features/auth';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab, buildDefaultStringNames } from '../store/BassTabProvider';
-import { Song, SongChart } from '../types/models';
+import { Song, SongBar, SongChart } from '../types/models';
 import { formatUpdatedAt } from '../utils/date';
-import { flattenSongRowsToChart, mergeChartIntoSongRows } from '../utils/songChart';
+import { flattenSongRowsToChart, mergeChartIntoSongRows, normalizeRowBarCounts } from '../utils/songChart';
 import {
   DEFAULT_BEAT_COUNT,
   MAX_BEAT_COUNT,
@@ -33,6 +33,10 @@ import { appLog } from '../utils/logging';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SongEditor'>;
 type SaveState = 'idle' | 'saving' | 'saved';
+type ChartEditorUpdates = Partial<SongChart> & {
+  bars?: SongBar[];
+  stringNames?: string[];
+};
 
 const NAMEPLATE_BG = '#1a120a';
 const NAMEPLATE_TEXT = '#f5e6c8';
@@ -58,6 +62,23 @@ const cloneSong = (song: Song): Song => ({
     bars: row.bars.map((bar) => ({
       ...(bar.beatCount !== undefined ? { beatCount: bar.beatCount } : {}),
       ...(bar.note !== undefined ? { note: bar.note } : {}),
+      ...(Array.isArray(bar.events)
+        ? {
+            events: bar.events.map((event) => ({
+              ...event,
+              pulseLabels: [...event.pulseLabels],
+              cells: Object.fromEntries(
+                Object.entries(event.cells).map(([stringName, cells]) => [
+                  stringName,
+                  cells.map((cell) => ({
+                    text: cell.text,
+                    segments: [...cell.segments],
+                  })),
+                ]),
+              ),
+            })),
+          }
+        : {}),
       cells: Object.fromEntries(
         Object.entries(bar.cells).map(([stringName, slots]) => [stringName, [...slots]]),
       ),
@@ -236,10 +257,64 @@ export function SongEditorScreen({ navigation, route }: Props) {
     setSaveState('idle');
   };
 
-  const handleChartChange = (updates: Partial<SongChart>) => {
+  const handleChartChange = (updates: ChartEditorUpdates) => {
     setDraftSong((current) => {
       if (!current) {
         return current;
+      }
+
+      if (updates.bars) {
+        const nextBars = updates.bars;
+        const nextStringNames = updates.stringNames ?? current.stringNames;
+        const fallbackRowBarCounts = current.rows.map((row) => row.bars.length);
+        const nextRowBarCounts = normalizeRowBarCounts(
+          nextBars.length,
+          updates.rowBarCounts ?? fallbackRowBarCounts,
+        );
+        const nextRowAnnotations =
+          updates.rowAnnotations ??
+          current.rows.map((row) => ({
+            label: row.label,
+            beforeText: row.beforeText,
+            afterText: row.afterText,
+            barNotes: row.bars.map((bar) => bar.note ?? ''),
+          }));
+        const nextDefaultBeatCount = normalizeBeatCount(
+          updates.defaultBeatCount ??
+          chart?.defaultBeatCount ??
+          current.rows[0]?.defaultBeatCount ??
+          DEFAULT_BEAT_COUNT,
+        );
+
+        let barCursor = 0;
+        const nextRows = nextRowBarCounts.map((barCount, rowIndex) => {
+          const sourceRow = current.rows[rowIndex];
+          const annotation = nextRowAnnotations[rowIndex];
+          const rowBars = nextBars.slice(barCursor, barCursor + barCount).map((bar, barIndex) => ({
+            ...bar,
+            note:
+              annotation?.barNotes?.[barIndex] !== undefined
+                ? annotation.barNotes[barIndex]
+                : bar.note,
+          }));
+          barCursor += barCount;
+
+          return {
+            id: sourceRow?.id ?? createId('row'),
+            label: annotation?.label ?? sourceRow?.label ?? '',
+            beforeText: annotation?.beforeText ?? sourceRow?.beforeText ?? '',
+            afterText: annotation?.afterText ?? sourceRow?.afterText ?? '',
+            defaultBeatCount: nextDefaultBeatCount,
+            bars: rowBars,
+          };
+        });
+
+        return {
+          ...current,
+          stringNames: nextStringNames,
+          stringCount: nextStringNames.length,
+          rows: nextRows,
+        };
       }
 
       const baseChart = flattenSongRowsToChart(current);
@@ -392,6 +467,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
         <SectionEditorCard
           key={chart.id}
           section={chart}
+          stringNamesOverride={editorSong.stringNames}
+          barsOverride={editorSong.rows.flatMap((row) => row.bars)}
           index={0}
           isFirst
           isLast

@@ -79,6 +79,45 @@ const getEventPulseCount = (event: SongBarEvent): number =>
     ...Object.values(event.cells).map((eventCells) => eventCells?.[0]?.segments.length ?? 0),
   );
 
+const clampBeatSplit = (value: number): 2 | 3 | 4 => {
+  if (value <= 2) {
+    return 2;
+  }
+
+  if (value === 3) {
+    return 3;
+  }
+
+  return 4;
+};
+
+const getBeatSplitsForBar = (bar: ParsedBar): Array<2 | 3 | 4> => {
+  const eventBackedBar = bar as ParsedBar & { events?: SongBarEvent[] };
+  if (Array.isArray(eventBackedBar.events) && eventBackedBar.events.length > 0) {
+    return getSortedBarEvents(eventBackedBar as SongBar).map((event) =>
+      clampBeatSplit(getEventPulseCount(event)),
+    );
+  }
+
+  const beatCount = getBarBeatCount(bar);
+  return Array.from({ length: beatCount }, () => 2 as const);
+};
+
+const getBeatRangesForBar = (
+  bar: ParsedBar,
+): Array<{ split: 2 | 3 | 4; startSlot: number; endSlot: number }> => {
+  let slotCursor = 0;
+  return getBeatSplitsForBar(bar).map((split) => {
+    const startSlot = slotCursor;
+    slotCursor += split;
+    return {
+      split,
+      startSlot,
+      endSlot: slotCursor,
+    };
+  });
+};
+
 const buildLegacyBarsFromSongRows = (stringNames: string[], songRows: SongRow[]): ParsedBar[] =>
   songRows.flatMap((row) =>
     row.bars.map((bar) => {
@@ -105,7 +144,22 @@ const buildLegacyBarsFromSongRows = (stringNames: string[], songRows: SongRow[])
         }
       }
 
-      return { cells };
+      return {
+        cells,
+        events: bar.events.map((event) => ({
+          ...event,
+          pulseLabels: [...event.pulseLabels],
+          cells: Object.fromEntries(
+            stringNames.map((stringName) => [
+              stringName,
+              (event.cells[stringName] ?? []).map((cell) => ({
+                text: cell.text,
+                segments: [...cell.segments],
+              })),
+            ]),
+          ),
+        })),
+      } as ParsedBar;
     }),
   );
 
@@ -127,6 +181,54 @@ const slotToSegment = (value: string): string => {
 const joinRenderedBars = (segments: string[]) =>
   segments.map((segment, index) => (index === 0 ? segment : segment.slice(1))).join('');
 
+const getAsciiEventBackedBar = (bar: ParsedBar): SongBar | null => {
+  const eventBackedBar = bar as ParsedBar & { events?: SongBarEvent[] };
+  return Array.isArray(eventBackedBar.events) && eventBackedBar.events.length > 0
+    ? (eventBackedBar as SongBar)
+    : null;
+};
+
+const getAsciiBarSlotCount = (bar: ParsedBar): number => {
+  const eventBackedBar = getAsciiEventBackedBar(bar);
+  if (!eventBackedBar) {
+    return getBarSlotCount(bar);
+  }
+
+  return getSortedBarEvents(eventBackedBar)
+    .map((event) => getEventPulseCount(event))
+    .reduce((sum, pulseCount) => sum + pulseCount, 0);
+};
+
+const getAsciiBarTextWidth = (bar: ParsedBar): number => {
+  const eventBackedBar = getAsciiEventBackedBar(bar);
+  if (!eventBackedBar) {
+    return getBarSlotCount(bar) * 2;
+  }
+
+  return getSortedBarEvents(eventBackedBar)
+    .map((event, eventIndex) => {
+      const pulseCount = getEventPulseCount(event);
+      const fallbackBeat =
+        typeof event.beatStart === 'number' && Number.isFinite(event.beatStart)
+          ? Math.max(1, Math.round(event.beatStart))
+          : eventIndex + 1;
+
+      return Array.from({ length: pulseCount }, (_, pulseIndex) => {
+        const fallbackLabel =
+          pulseIndex === 0
+            ? String(fallbackBeat)
+            : pulseIndex === 1
+              ? '&'
+              : pulseIndex === 2
+                ? 'a'
+                : '';
+        const label = (event.pulseLabels[pulseIndex] ?? fallbackLabel).trim();
+        return Math.max(2, label.length);
+      }).reduce((sum, width) => sum + width, 0);
+    })
+    .reduce((sum, width) => sum + width, 0);
+};
+
 const renderAsciiBarNotes = (rowBars: ParsedBar[], barNotes: string[], prefixChars: number) => {
   if (!barNotes.some((note) => note.length > 0)) {
     return '';
@@ -135,8 +237,7 @@ const renderAsciiBarNotes = (rowBars: ParsedBar[], barNotes: string[], prefixCha
   const prefix = prefixChars > 0 ? ' '.repeat(prefixChars) : '';
   const rendered = joinRenderedBars(
     rowBars.map((bar, index) => {
-      const slots = getBarSlotCount(bar);
-      const barTextWidth = slots * 2;
+      const barTextWidth = getAsciiBarTextWidth(bar);
       return `|${(barNotes[index] ?? '').slice(0, barTextWidth).padEnd(barTextWidth, ' ')}|`;
     }),
   );
@@ -145,6 +246,34 @@ const renderAsciiBarNotes = (rowBars: ParsedBar[], barNotes: string[], prefixCha
 };
 
 const buildAsciiBeatGuideSegment = (bar: ParsedBar): string => {
+  const eventBackedBar = getAsciiEventBackedBar(bar);
+  if (eventBackedBar) {
+    const body = getSortedBarEvents(eventBackedBar)
+      .map((event, eventIndex) => {
+        const pulseCount = getEventPulseCount(event);
+        const fallbackBeat =
+          typeof event.beatStart === 'number' && Number.isFinite(event.beatStart)
+            ? Math.max(1, Math.round(event.beatStart))
+            : eventIndex + 1;
+
+        return Array.from({ length: pulseCount }, (_, pulseIndex) => {
+          const fallbackLabel =
+            pulseIndex === 0
+              ? String(fallbackBeat)
+              : pulseIndex === 1
+                ? '&'
+                : pulseIndex === 2
+                  ? 'a'
+                  : '';
+          const label = (event.pulseLabels[pulseIndex] ?? fallbackLabel).trim();
+          return label.padEnd(2, ' ');
+        }).join('');
+      })
+      .join('');
+
+    return `|${body}|`;
+  }
+
   const beatCount = getBarBeatCount(bar);
   let body = '|';
 
@@ -283,9 +412,9 @@ const renderNoteMarker = (stemX: number, fretY: number, accentColor: string, ste
 const renderHoldTail = (stemX: number, circleTopY: number, accentColor: string, stemHeight: number) =>
   renderStem(stemX, circleTopY, accentColor, 'hold-tail', stemHeight);
 
-const renderQuaverFlag = (stemX: number, stemTop: number, accentColor: string) => (
+const renderQuaverFlag = (stemX: number, stemTop: number, accentColor: string, keySuffix?: string) => (
   <Line
-    key={`quaver-flag-${stemX}-${stemTop}`}
+    key={`quaver-flag-${stemX}-${stemTop}${keySuffix ? `-${keySuffix}` : ''}`}
     x1={stemX}
     x2={stemX + SVG_FLAG_WIDTH}
     y1={stemTop}
@@ -533,11 +662,14 @@ function AsciiTabPagePreview({
                 ]}
               >
                 {`${stringName.padEnd(labelWidth)} ${joinRenderedBars(
-                  rowBars.map((bar) =>
-                    `|${(bar.cells[stringName] ?? Array.from({ length: getBarSlotCount(bar) }, () => EMPTY_SLOT))
-                      .map(slotToSegment)
-                      .join('')}|`,
-                  ),
+                  rowBars.map((bar) => {
+                    const targetSlots = getAsciiBarSlotCount(bar);
+                    const sourceSlots = bar.cells[stringName] ?? [];
+                    const slots = sourceSlots
+                      .slice(0, targetSlots)
+                      .concat(Array.from({ length: Math.max(0, targetSlots - sourceSlots.length) }, () => EMPTY_SLOT));
+                    return `|${slots.map(slotToSegment).join('')}|`;
+                  }),
                 )}`}
               </Text>
             ))}
@@ -570,6 +702,8 @@ const SVG_STEM_X_OFFSET = 5;
 const SVG_SHORT_BEAT_STEM_LEFT_ADJUST = 3;
 const SVG_SHORT_BEAT_STEM_Y_OFFSET = 10;
 const SVG_FRET_TEXT_Y_OFFSET = 4;
+const SVG_SPLIT_BEAM_GAP = 4;
+const SVG_SPLIT_TEXT_OFFSET = 5;
 
 const SVG_SCALE_PROFILES: Record<
   TabPreviewSvgScaleProfile,
@@ -691,6 +825,7 @@ function SvgTabPagePreview({
 
         const effectiveBarCount = Math.max(rowBars.length, 1);
         const rowBarSlotCounts = rowBars.map((bar) => getBarSlotCount(bar));
+        const rowBarBeatRanges = rowBars.map((bar) => getBeatRangesForBar(bar));
         const cumulativeBarOffsets = rowBarSlotCounts.reduce<number[]>((offsets, slotCount, index) => {
           if (index === 0) {
             offsets.push(0);
@@ -832,6 +967,62 @@ function SvgTabPagePreview({
                   );
                 })}
 
+                {rowBars.flatMap((bar, barIndex) => {
+                  const beatRanges = rowBarBeatRanges[barIndex] ?? [];
+                  const barSlotOffset = cumulativeBarOffsets[barIndex] ?? 0;
+
+                  return beatRanges.flatMap((beatRange, beatIndex) => {
+                    if (beatRange.split !== 3) {
+                      return [];
+                    }
+
+                    const usedStringIndices = stringNames
+                      .map((stringName, stringIndex) => {
+                        const hasAnyNoteInBeat = Array.from(
+                          { length: beatRange.endSlot - beatRange.startSlot },
+                          (_, pulseOffset) => beatRange.startSlot + pulseOffset,
+                        ).some((slotIndex) => !isEmptySlotValue(bar.cells[stringName]?.[slotIndex] ?? EMPTY_SLOT));
+                        return hasAnyNoteInBeat ? stringIndex : -1;
+                      })
+                      .filter((stringIndex) => stringIndex >= 0);
+
+                    if (usedStringIndices.length === 0) {
+                      return [];
+                    }
+
+                    const lowestUsedStringIndex = Math.max(...usedStringIndices);
+                    const tripletY = (stringPositions[lowestUsedStringIndex] ?? stringPositions[0]) + 7;
+                    const tripletStartX =
+                      svgScale.rowPadding + (barSlotOffset + beatRange.startSlot) * slotAdvance + 7;
+                    const tripletEndX =
+                      svgScale.rowPadding + (barSlotOffset + beatRange.endSlot) * slotAdvance - 7;
+                    const centerX = (tripletStartX + tripletEndX) / 2;
+
+                    return [
+                      <Line
+                        key={`svg-triplet-line-${rowIndex}-${barIndex}-${beatIndex}`}
+                        x1={tripletStartX}
+                        x2={tripletEndX}
+                        y1={tripletY}
+                        y2={tripletY}
+                        stroke={accentColor}
+                        strokeWidth={SVG_LINE_STROKE}
+                      />,
+                      <SvgText
+                        key={`svg-triplet-num-${rowIndex}-${barIndex}-${beatIndex}`}
+                        x={centerX}
+                        y={tripletY + SVG_SPLIT_TEXT_OFFSET + 2}
+                        fill={accentColor}
+                        fontSize={9}
+                        textAnchor="middle"
+                        alignmentBaseline="middle"
+                      >
+                        3
+                      </SvgText>,
+                    ];
+                  });
+                })}
+
                 {rowBars.map((bar, barIndex) =>
                   stringNames.map((stringName, stringIndex) =>
                     (bar.cells[stringName] ?? Array.from({ length: getBarSlotCount(bar) }, () => EMPTY_SLOT)).map(
@@ -849,7 +1040,10 @@ function SvgTabPagePreview({
                           slotIndex * slotAdvance +
                           effectiveSlotWidth / 2;
                         const fretY = stringPositions[stringIndex];
-                        const noteStyle = isTimedNote
+                        const splitForSlot = (rowBarBeatRanges[barIndex] ?? []).find(
+                          (beatRange) => slotIndex >= beatRange.startSlot && slotIndex < beatRange.endSlot,
+                        )?.split ?? 2;
+                        const computedNoteStyle = isTimedNote
                           ? getNoteRenderStyle({
                             rowBars,
                             stringName,
@@ -857,6 +1051,9 @@ function SvgTabPagePreview({
                             slotIndex,
                           })
                           : 'short';
+                        // For 16th-note split beats (split=4), render each entered note independently.
+                        // This intentionally bypasses sustain-style inference within the split.
+                        const noteStyle = isTimedNote && splitForSlot === 4 ? 'short' : computedNoteStyle;
                         const shortBeatStemBaseY = fretY - SVG_SHORT_BEAT_STEM_Y_OFFSET;
                         const stemTop = shortBeatStemBaseY - svgScale.stemHeight;
                         const circleCenterY =
@@ -881,6 +1078,7 @@ function SvgTabPagePreview({
                         const shouldDrawStem = isTimedNote && (noteStyle === 'short' || noteStyle === 'beat');
                         const shouldDrawHoldTail = isTimedNote && noteStyle === 'hold2';
                         const shouldDrawFlag = isTimedNote && noteStyle === 'short' && tailOriginY !== undefined;
+                        const shouldDrawSecondFlag = shouldDrawFlag && splitForSlot === 4;
                         const stemX =
                           noteStyle === 'short' || noteStyle === 'beat'
                             ? fretX + SVG_STEM_X_OFFSET - SVG_SHORT_BEAT_STEM_LEFT_ADJUST
@@ -905,6 +1103,8 @@ function SvgTabPagePreview({
                               renderHoldTail(fretX, circleTopY, accentColor, svgScale.stemHeight)}
                             {shouldDrawFlag &&
                               renderQuaverFlag(stemX, tailOriginY, accentColor)}
+                            {shouldDrawSecondFlag &&
+                              renderQuaverFlag(stemX, tailOriginY + SVG_SPLIT_BEAM_GAP, accentColor, 'split4')}
                             {isTimedNote && (noteStyle === 'hold4' || noteStyle === 'hold2') && (
                               <Circle
                                 cx={fretX}

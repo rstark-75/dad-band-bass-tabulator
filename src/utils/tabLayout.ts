@@ -217,7 +217,51 @@ export const renderTab = (stringNames: string[], bars: ParsedBar[]): string =>
 const joinRenderedBars = (segments: string[]) =>
   segments.map((segment, index) => (index === 0 ? segment : segment.slice(1))).join('');
 
-const getBeatGuide = (beatCount: number): string => {
+const getBeatGuideForBar = (bar: ParsedBar): string => {
+  const eventBackedBar = bar as ParsedBar & {
+    events?: Array<{
+      order?: number;
+      beatStart?: number;
+      pulseLabels?: string[];
+      cells?: Record<string, Array<{ segments?: string[] }>>;
+    }>;
+  };
+
+  if (Array.isArray(eventBackedBar.events) && eventBackedBar.events.length > 0) {
+    const orderedEvents = [...eventBackedBar.events].sort(
+      (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER),
+    );
+    const body = orderedEvents
+      .map((event, eventIndex) => {
+        const pulseCount = Math.max(
+          1,
+          event.pulseLabels?.length ?? 0,
+          ...Object.values(event.cells ?? {}).map((eventCells) => eventCells?.[0]?.segments?.length ?? 0),
+        );
+        const fallbackBeat =
+          typeof event.beatStart === 'number' && Number.isFinite(event.beatStart)
+            ? Math.max(1, Math.round(event.beatStart))
+            : eventIndex + 1;
+
+        return Array.from({ length: pulseCount }, (_, pulseIndex) => {
+          const fallbackLabel =
+            pulseIndex === 0
+              ? String(fallbackBeat)
+              : pulseIndex === 1
+                ? '&'
+                : pulseIndex === 2
+                  ? 'a'
+                  : '';
+          const label = (event.pulseLabels?.[pulseIndex] ?? fallbackLabel).trim();
+          return label.padEnd(2, ' ');
+        }).join('');
+      })
+      .join('');
+
+    return `|${body}`;
+  }
+
+  const beatCount = getBarBeatCount(bar);
   let guide = '|';
 
   for (let beat = 1; beat <= beatCount; beat += 1) {
@@ -263,7 +307,7 @@ export const buildTabPagePreview = (
       rows.push(buildBarNoteGuide(rowBars, annotation.barNotes.slice(0, rowBars.length)));
     }
 
-    rows.push(`  ${joinRenderedBars(rowBars.map((bar) => getBeatGuide(getBarBeatCount(bar))))}`);
+    rows.push(`  ${joinRenderedBars(rowBars.map((bar) => getBeatGuideForBar(bar)))}`);
 
     stringNames.forEach((stringName) => {
       const renderedSegments = rowBars
