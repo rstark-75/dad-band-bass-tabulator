@@ -16,7 +16,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { Circle, Svg, Text as SvgText } from 'react-native-svg';
 
-import { BassTabApiError, CommunitySongCardDto, createBassTabApiFromEnv } from '../api';
+import { BassTabApiError, CommunitySongCardDto, createBassTabApiFromEnv, fromSongDto } from '../api';
 import { AppSectionNav } from '../components/AppSectionNav';
 import { EmptyState } from '../components/EmptyState';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -33,11 +33,9 @@ import {
 import { useAuth } from '../features/auth';
 import { RootStackParamList, TabParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
-import { CommunitySongAuthor, CommunitySongCard, SongChart } from '../types/models';
+import { CommunitySongAuthor, CommunitySongCard, SongRow } from '../types/models';
 import { SongListItem } from '../components/SongListItem';
 import { appLog } from '../utils/logging';
-import { flattenSongRowsToChart } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<TabParamList, 'Import'>,
@@ -46,7 +44,6 @@ type Props = CompositeScreenProps<
 
 type CommunitySongListItem = CommunitySongCard;
 const FREE_PREVIEW_ROW_LIMIT = 2;
-const DEFAULT_BARS_PER_ROW = 4;
 
 interface CommunityPreviewData {
   title: string;
@@ -56,42 +53,23 @@ interface CommunityPreviewData {
   tuning: string;
   author?: CommunitySongAuthor;
   stringNames: string[];
-  bars: ReturnType<typeof parseTab>['bars'];
-  rowAnnotations: SongChart['rowAnnotations'];
-  rowBarCounts: number[];
-}
-
-function resolvePreviewRowCounts(rowBarCounts: number[] | undefined, totalBars: number): number[] {
-  if (rowBarCounts && rowBarCounts.length > 0) {
-    return rowBarCounts.filter((count) => count > 0);
-  }
-
-  return Array.from(
-    { length: Math.max(1, Math.ceil(totalBars / DEFAULT_BARS_PER_ROW)) },
-    () => DEFAULT_BARS_PER_ROW,
-  );
+  rows: SongRow[];
 }
 
 function getFreePreviewData(previewData: CommunityPreviewData): {
   data: CommunityPreviewData;
   isTruncated: boolean;
 } {
-  const resolvedCounts = resolvePreviewRowCounts(previewData.rowBarCounts, previewData.bars.length);
-  const isTruncated = resolvedCounts.length > FREE_PREVIEW_ROW_LIMIT;
+  const isTruncated = previewData.rows.length > FREE_PREVIEW_ROW_LIMIT;
 
   if (!isTruncated) {
     return { data: previewData, isTruncated: false };
   }
 
-  const limitedCounts = resolvedCounts.slice(0, FREE_PREVIEW_ROW_LIMIT);
-  const shownBarCount = limitedCounts.reduce((sum, count) => sum + count, 0);
-
   return {
     data: {
       ...previewData,
-      bars: previewData.bars.slice(0, shownBarCount),
-      rowAnnotations: previewData.rowAnnotations.slice(0, limitedCounts.length),
-      rowBarCounts: limitedCounts,
+      rows: previewData.rows.slice(0, FREE_PREVIEW_ROW_LIMIT),
     },
     isTruncated: true,
   };
@@ -401,11 +379,17 @@ export function ImportScreen({ navigation }: Props) {
 
     try {
       const communitySong = await backendApi.getCommunitySong(resolveCommunityDetailId(song));
-      const flattened = flattenSongRowsToChart({
-        stringNames: communitySong.chart.stringNames,
-        rows: communitySong.chart.rows,
-      });
-      const parsed = parseTab(flattened.tab);
+      const normalizedRows = fromSongDto({
+        id: communitySong.id,
+        title: communitySong.title,
+        artist: communitySong.artist,
+        authorComment: communitySong.authorComment ?? null,
+        key: communitySong.key ?? null,
+        tuning: communitySong.tuning ?? null,
+        updatedAt: communitySong.updatedAt,
+        stringCount: communitySong.stringCount ?? communitySong.chart.stringNames.length,
+        chart: communitySong.chart,
+      }).rows;
 
       setPreviewData({
         title: communitySong.title,
@@ -420,11 +404,8 @@ export function ImportScreen({ navigation }: Props) {
             avatarUrl: communitySong.author.avatarUrl ?? null,
           }
           : undefined,
-        stringNames:
-          parsed.stringNames.length > 0 ? parsed.stringNames : communitySong.chart.stringNames,
-        bars: parsed.bars,
-        rowAnnotations: flattened.rowAnnotations,
-        rowBarCounts: flattened.rowBarCounts,
+        stringNames: communitySong.chart.stringNames,
+        rows: normalizedRows,
       });
       setPreviewRenderMode(capabilities.svgEnabled ? 'svg' : 'ascii');
     } catch (error) {
@@ -1025,9 +1006,7 @@ export function ImportScreen({ navigation }: Props) {
                 >
                   <TabPagePreview
                     stringNames={displayPreviewData.stringNames}
-                    bars={displayPreviewData.bars}
-                    rowAnnotations={displayPreviewData.rowAnnotations}
-                    rowBarCounts={displayPreviewData.rowBarCounts}
+                    songRows={displayPreviewData.rows}
                     renderMode={previewRenderMode}
                     compact
                   />

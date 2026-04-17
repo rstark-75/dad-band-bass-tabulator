@@ -12,7 +12,6 @@ import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../fea
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { flattenSongRowsToChart } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
 import { useWebPrintStyles } from '../utils/useWebPrintStyles';
 import { appLog } from '../utils/logging';
 
@@ -142,8 +141,7 @@ export function SongExportScreen({ navigation, route }: Props) {
   }
 
   const chart = flattenSongRowsToChart(song);
-  const { stringNames, bars } = parseTab(chart.tab);
-  const stringCount = stringNames.length;
+  const stringCount = song.stringNames.length;
   const teaserTab = chart.tab.split('\n').slice(0, 4).join('\n');
   const handleRenderModeChange = (mode: TabPreviewRenderMode) => {
     if (mode === 'svg' && !capabilities.svgEnabled) {
@@ -280,10 +278,8 @@ export function SongExportScreen({ navigation, route }: Props) {
 
           <View style={styles.chartBody}>
             <TabPagePreview
-              stringNames={stringNames}
-              bars={bars}
-              rowAnnotations={chart.rowAnnotations ?? []}
-              rowBarCounts={chart.rowBarCounts}
+              stringNames={song.stringNames}
+              songRows={song.rows}
               tone="light"
               compact
               renderMode={renderMode}

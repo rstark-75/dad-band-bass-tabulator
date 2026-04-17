@@ -9,61 +9,35 @@ import { palette } from '../constants/colors';
 import { useSubscription } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
-import { Song } from '../types/models';
-import { flattenSongRowsToChart } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
+import { Song, SongRow } from '../types/models';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SetlistPerformance'>;
 type PerformanceTone = 'light' | 'dark';
 const FREE_SVG_ROW_LIMIT = 2;
-const DEFAULT_BARS_PER_ROW = 4;
 
 interface PerformanceItem {
   song: Song;
   stringNames: string[];
-  bars: ReturnType<typeof parseTab>['bars'];
-  rowAnnotations: ReturnType<typeof flattenSongRowsToChart>['rowAnnotations'];
-  rowBarCounts: ReturnType<typeof flattenSongRowsToChart>['rowBarCounts'];
-}
-
-function resolvePreviewRowCounts(rowBarCounts: number[] | undefined, totalBars: number): number[] {
-  if (rowBarCounts && rowBarCounts.length > 0) {
-    return rowBarCounts.filter((count) => count > 0);
-  }
-
-  return Array.from(
-    { length: Math.max(1, Math.ceil(totalBars / DEFAULT_BARS_PER_ROW)) },
-    () => DEFAULT_BARS_PER_ROW,
-  );
+  rows: SongRow[];
 }
 
 function getFreeSvgPerformanceItem(
   item: PerformanceItem,
 ): {
-  bars: PerformanceItem['bars'];
-  rowAnnotations: PerformanceItem['rowAnnotations'];
-  rowBarCounts: number[];
+  rows: SongRow[];
   isTruncated: boolean;
 } {
-  const resolvedCounts = resolvePreviewRowCounts(item.rowBarCounts, item.bars.length);
-  const isTruncated = resolvedCounts.length > FREE_SVG_ROW_LIMIT;
+  const isTruncated = item.rows.length > FREE_SVG_ROW_LIMIT;
 
   if (!isTruncated) {
     return {
-      bars: item.bars,
-      rowAnnotations: item.rowAnnotations,
-      rowBarCounts: resolvedCounts,
+      rows: item.rows,
       isTruncated: false,
     };
   }
 
-  const limitedCounts = resolvedCounts.slice(0, FREE_SVG_ROW_LIMIT);
-  const shownBarCount = limitedCounts.reduce((sum, count) => sum + count, 0);
-
   return {
-    bars: item.bars.slice(0, shownBarCount),
-    rowAnnotations: item.rowAnnotations.slice(0, limitedCounts.length),
-    rowBarCounts: limitedCounts,
+    rows: item.rows.slice(0, FREE_SVG_ROW_LIMIT),
     isTruncated: true,
   };
 }
@@ -94,14 +68,10 @@ export function SetlistPerformanceScreen({ route, navigation }: Props) {
 
   const performanceItems = useMemo<PerformanceItem[]>(() => {
     return orderedSongs.map((song) => {
-      const chart = flattenSongRowsToChart(song);
-      const parsed = parseTab(chart.tab);
       return {
         song,
-        stringNames: parsed.stringNames.length > 0 ? parsed.stringNames : song.stringNames,
-        bars: parsed.bars,
-        rowAnnotations: chart.rowAnnotations ?? [],
-        rowBarCounts: chart.rowBarCounts,
+        stringNames: song.stringNames,
+        rows: song.rows,
       };
     });
   }, [orderedSongs]);
@@ -282,11 +252,7 @@ export function SetlistPerformanceScreen({ route, navigation }: Props) {
           {(() => {
             const isFreeSvgMode = tier !== 'PRO' && renderMode === 'svg';
             const freeSvgItem = isFreeSvgMode ? getFreeSvgPerformanceItem(currentItem) : null;
-            const displayBars = freeSvgItem ? freeSvgItem.bars : currentItem.bars;
-            const displayRowAnnotations = freeSvgItem
-              ? freeSvgItem.rowAnnotations
-              : currentItem.rowAnnotations;
-            const displayRowBarCounts = freeSvgItem ? freeSvgItem.rowBarCounts : currentItem.rowBarCounts;
+            const displayRows = freeSvgItem ? freeSvgItem.rows : currentItem.rows;
             const showFreeSvgUpsell = Boolean(freeSvgItem?.isTruncated);
 
             return (
@@ -305,9 +271,7 @@ export function SetlistPerformanceScreen({ route, navigation }: Props) {
             >
               <TabPagePreview
                 stringNames={currentItem.stringNames}
-                bars={displayBars}
-                rowAnnotations={displayRowAnnotations}
-                rowBarCounts={displayRowBarCounts}
+                songRows={displayRows}
                 tone={tone}
                 compact={useCompactPreview}
                 renderMode={renderMode}

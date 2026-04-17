@@ -8,56 +8,31 @@ import { palette } from '../constants/colors';
 import { useSubscription } from '../features/subscription';
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
-import { flattenSongRowsToChart } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
+import { SongRow } from '../types/models';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PerformanceView'>;
 type PerformanceTone = 'light' | 'dark';
 const FREE_SVG_ROW_LIMIT = 2;
-const DEFAULT_BARS_PER_ROW = 4;
-
-function resolvePreviewRowCounts(rowBarCounts: number[] | undefined, totalBars: number): number[] {
-  if (rowBarCounts && rowBarCounts.length > 0) {
-    return rowBarCounts.filter((count) => count > 0);
-  }
-
-  return Array.from(
-    { length: Math.max(1, Math.ceil(totalBars / DEFAULT_BARS_PER_ROW)) },
-    () => DEFAULT_BARS_PER_ROW,
-  );
-}
 
 function getFreeSvgPreviewData(
   input: {
-    bars: ReturnType<typeof parseTab>['bars'];
-    rowAnnotations: ReturnType<typeof flattenSongRowsToChart>['rowAnnotations'];
-    rowBarCounts: ReturnType<typeof flattenSongRowsToChart>['rowBarCounts'];
+    rows: SongRow[];
   },
 ): {
-  bars: ReturnType<typeof parseTab>['bars'];
-  rowAnnotations: ReturnType<typeof flattenSongRowsToChart>['rowAnnotations'];
-  rowBarCounts: number[];
+  rows: SongRow[];
   isTruncated: boolean;
 } {
-  const resolvedCounts = resolvePreviewRowCounts(input.rowBarCounts, input.bars.length);
-  const isTruncated = resolvedCounts.length > FREE_SVG_ROW_LIMIT;
+  const isTruncated = input.rows.length > FREE_SVG_ROW_LIMIT;
 
   if (!isTruncated) {
     return {
-      bars: input.bars,
-      rowAnnotations: input.rowAnnotations,
-      rowBarCounts: resolvedCounts,
+      rows: input.rows,
       isTruncated: false,
     };
   }
 
-  const limitedCounts = resolvedCounts.slice(0, FREE_SVG_ROW_LIMIT);
-  const shownBarCount = limitedCounts.reduce((sum, count) => sum + count, 0);
-
   return {
-    bars: input.bars.slice(0, shownBarCount),
-    rowAnnotations: input.rowAnnotations.slice(0, limitedCounts.length),
-    rowBarCounts: limitedCounts,
+    rows: input.rows.slice(0, FREE_SVG_ROW_LIMIT),
     isTruncated: true,
   };
 }
@@ -81,40 +56,29 @@ export function LiveViewScreen({ route, navigation }: Props) {
   const canvasHorizontalPadding = isPhone ? 16 : 24;
   const svgViewportWidth = Math.max(240, canvasWidth - canvasHorizontalPadding * 2);
   const song = songs.find((item) => item.id === songId);
-  const chart = useMemo(
-    () => (song ? flattenSongRowsToChart(song) : undefined),
-    [song],
-  );
   const previewData = useMemo(() => {
-    if (!chart) {
+    if (!song) {
       return null;
     }
 
-    const { stringNames, bars } = parseTab(chart.tab);
     const freeSvgPreview = getFreeSvgPreviewData({
-      bars,
-      rowAnnotations: chart.rowAnnotations ?? [],
-      rowBarCounts: chart.rowBarCounts,
+      rows: song.rows,
     });
     const isFreeSvgMode = tier !== 'PRO' && renderMode === 'svg';
     const displayData = isFreeSvgMode
       ? {
-        bars: freeSvgPreview.bars,
-        rowAnnotations: freeSvgPreview.rowAnnotations,
-        rowBarCounts: freeSvgPreview.rowBarCounts,
+        rows: freeSvgPreview.rows,
       }
       : {
-        bars,
-        rowAnnotations: chart.rowAnnotations ?? [],
-        rowBarCounts: chart.rowBarCounts,
+        rows: song.rows,
       };
 
     return {
-      stringNames,
+      stringNames: song.stringNames,
       ...displayData,
       showFreeSvgUpsell: isFreeSvgMode && freeSvgPreview.isTruncated,
     };
-  }, [chart, renderMode, tier]);
+  }, [song, renderMode, tier]);
 
   useEffect(() => {
     if (hasAutoSelectedSvgModeRef.current) {
@@ -136,7 +100,7 @@ export function LiveViewScreen({ route, navigation }: Props) {
     setTone(nextTone);
   };
 
-  if (!song || !chart) {
+  if (!song) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.emptyState}>
@@ -234,9 +198,7 @@ export function LiveViewScreen({ route, navigation }: Props) {
                 <>
                   <TabPagePreview
                     stringNames={previewData.stringNames}
-                    bars={previewData.bars}
-                    rowAnnotations={previewData.rowAnnotations}
-                    rowBarCounts={previewData.rowBarCounts}
+                    songRows={previewData.rows}
                     tone={tone}
                     compact={useCompactPreview}
                     renderMode={renderMode}

@@ -1,22 +1,51 @@
-import { SongBar, SongRow } from '../types/models';
 import { DEFAULT_SUBSCRIPTION_CAPABILITIES } from '../constants/subscription';
 import { appLog } from '../utils/logging';
+
+export interface SongChartCellDto {
+  text: string;
+  segments: string[];
+}
+
+export interface SongChartEventDto {
+  id: string;
+  order: number;
+  timingText: string | null;
+  beatStart: number | null;
+  beatEnd: number | null;
+  pulseLabels: string[];
+  cells: Record<string, SongChartCellDto[]>;
+}
+
+export interface SongChartBarDto {
+  id: string;
+  note: string | null;
+  events: SongChartEventDto[];
+}
+
+export interface SongChartRowDto {
+  id: string;
+  label: string | null;
+  beforeText: string | null;
+  afterText: string | null;
+  bars: SongChartBarDto[];
+}
 
 export interface SongMetadataDto {
   id: string;
   title: string;
   artist: string;
   authorComment?: string | null;
-  key: string;
-  tuning: string;
+  key: string | null;
+  tuning: string | null;
   updatedAt: string;
   stringCount: number;
   importedPublishedSongId?: string | null;
 }
 
 export interface SongChartDto {
+  schemaVersion: 2;
   stringNames: string[];
-  rows: SongRow[];
+  rows: SongChartRowDto[];
 }
 
 export interface SongDto extends SongMetadataDto {
@@ -33,19 +62,19 @@ export interface PlaylistDto {
 export interface CreateSongRequestDto {
   title: string;
   artist: string;
-  authorComment?: string;
-  key: string;
-  tuning: string;
+  authorComment?: string | null;
+  key?: string | null;
+  tuning?: string | null;
   chart: SongChartDto;
-  stringCount: number;
+  stringCount?: number;
 }
 
 export interface UpdateSongMetadataRequestDto {
   title?: string;
   artist?: string;
-  authorComment?: string;
-  key?: string;
-  tuning?: string;
+  authorComment?: string | null;
+  key?: string | null;
+  tuning?: string | null;
   stringCount?: number;
 }
 
@@ -230,32 +259,54 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
-const isSongBar = (value: unknown): value is SongBar => {
-  if (!isRecord(value)) {
+const isSongChartCellDto = (value: unknown): value is SongChartCellDto =>
+  isRecord(value) &&
+  typeof value.text === 'string' &&
+  isStringArray(value.segments);
+
+const isSongChartEventDto = (value: unknown): value is SongChartEventDto => {
+  if (!isRecord(value) || !Array.isArray(value.pulseLabels) || !isRecord(value.cells)) {
     return false;
   }
 
-  const { cells } = value;
-
-  if (!isRecord(cells)) {
-    return false;
-  }
-
-  return Object.values(cells).every((slots) => isStringArray(slots));
+  return (
+    typeof value.id === 'string' &&
+    typeof value.order === 'number' &&
+    (typeof value.timingText === 'string' || value.timingText === null) &&
+    (typeof value.beatStart === 'number' || value.beatStart === null) &&
+    (typeof value.beatEnd === 'number' || value.beatEnd === null) &&
+    value.pulseLabels.every((label) => typeof label === 'string') &&
+    Object.values(value.cells).every(
+      (entry) => Array.isArray(entry) && entry.every((cell) => isSongChartCellDto(cell)),
+    )
+  );
 };
 
-const isSongRow = (value: unknown): value is SongRow => {
+const isSongChartBarDto = (value: unknown): value is SongChartBarDto => {
   if (!isRecord(value)) {
     return false;
   }
 
   return (
     typeof value.id === 'string' &&
-    typeof value.label === 'string' &&
-    typeof value.beforeText === 'string' &&
-    typeof value.afterText === 'string' &&
+    (typeof value.note === 'string' || value.note === null || typeof value.note === 'undefined') &&
+    Array.isArray(value.events) &&
+    value.events.every((event) => isSongChartEventDto(event))
+  );
+};
+
+const isSongChartRowDto = (value: unknown): value is SongChartRowDto => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === 'string' &&
+    (typeof value.label === 'string' || value.label === null || typeof value.label === 'undefined') &&
+    (typeof value.beforeText === 'string' || value.beforeText === null || typeof value.beforeText === 'undefined') &&
+    (typeof value.afterText === 'string' || value.afterText === null || typeof value.afterText === 'undefined') &&
     Array.isArray(value.bars) &&
-    value.bars.every((bar) => isSongBar(bar))
+    value.bars.every((bar) => isSongChartBarDto(bar))
   );
 };
 
@@ -264,7 +315,12 @@ const isSongChartDto = (value: unknown): value is SongChartDto => {
     return false;
   }
 
-  return isStringArray(value.stringNames) && Array.isArray(value.rows) && value.rows.every((row) => isSongRow(row));
+  return (
+    value.schemaVersion === 2 &&
+    isStringArray(value.stringNames) &&
+    Array.isArray(value.rows) &&
+    value.rows.every((row) => isSongChartRowDto(row))
+  );
 };
 
 const isSongMetadataDto = (value: unknown): value is SongMetadataDto => {
@@ -277,8 +333,8 @@ const isSongMetadataDto = (value: unknown): value is SongMetadataDto => {
     typeof value.title === 'string' &&
     typeof value.artist === 'string' &&
     (typeof value.authorComment === 'undefined' || isNullableString(value.authorComment)) &&
-    typeof value.key === 'string' &&
-    typeof value.tuning === 'string' &&
+    isNullableString(value.key) &&
+    isNullableString(value.tuning) &&
     typeof value.updatedAt === 'string' &&
     typeof value.stringCount === 'number'
   );
@@ -770,9 +826,8 @@ const toCommunitySongDetailDto = (value: unknown): CommunitySongDetailDto => {
     throw new Error('Invalid community song response payload.');
   }
 
-  const chart = value.chart;
-
-  if (!isSongChartDto(chart)) {
+  const chart = normalizeSongChartDto(value.chart);
+  if (!chart) {
     throw new Error('Invalid community song response payload.');
   }
 
@@ -834,8 +889,8 @@ const normalizeSongMetadataDto = (value: unknown): SongMetadataDto | null => {
     title: typeof value.title === 'string' ? value.title : '',
     artist: typeof value.artist === 'string' ? value.artist : '',
     authorComment: isNullableString(value.authorComment) ? value.authorComment : null,
-    key: typeof value.key === 'string' ? value.key : 'E',
-    tuning: typeof value.tuning === 'string' ? value.tuning : 'EADG',
+    key: isNullableString(value.key) ? value.key : null,
+    tuning: isNullableString(value.tuning) ? value.tuning : null,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
     stringCount: typeof value.stringCount === 'number' ? value.stringCount : 4,
     importedPublishedSongId:
@@ -869,46 +924,132 @@ export const parseSongMetadataDto = (value: unknown): SongMetadataDto => {
 };
 
 export const parseSongChartDto = (value: unknown): SongChartDto => {
-  if (!isSongChartDto(value)) {
+  const chart = normalizeSongChartDto(value);
+
+  if (!chart) {
     throw new Error('Invalid song chart response payload.');
   }
 
-  return value;
+  return chart;
 };
 
-const normalizeSongBar = (value: unknown): SongBar | null => {
+const normalizeSongChartCellDto = (value: unknown): SongChartCellDto | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    text: typeof value.text === 'string' ? value.text : '',
+    segments: isStringArray(value.segments) ? value.segments : [],
+  };
+};
+
+const normalizeSongChartEventDto = (
+  value: unknown,
+  stringNames: string[],
+): SongChartEventDto | null => {
   if (!isRecord(value) || !isRecord(value.cells)) {
     return null;
   }
 
-  const cells: Record<string, string[]> = {};
-  for (const [k, v] of Object.entries(value.cells)) {
-    cells[k] = isStringArray(v) ? v : [];
+  if (typeof value.id !== 'string' || typeof value.order !== 'number' || !isStringArray(value.pulseLabels)) {
+    return null;
+  }
+
+  const cellKeys = Object.keys(value.cells);
+  const expectedKeys = [...stringNames].sort();
+  if (cellKeys.sort().join('||') !== expectedKeys.sort().join('||')) {
+    return null;
+  }
+
+  const pulseLabels = value.pulseLabels;
+  const cells: Record<string, SongChartCellDto[]> = {};
+  for (const stringName of stringNames) {
+    const entry = value.cells[stringName];
+    const normalizedCells = Array.isArray(entry)
+      ? entry
+        .map((cell) => normalizeSongChartCellDto(cell))
+        .filter(Boolean) as SongChartCellDto[]
+      : [];
+
+    if (normalizedCells.some((cell) => cell.segments.length !== pulseLabels.length)) {
+      return null;
+    }
+
+    cells[stringName] = normalizedCells;
   }
 
   return {
+    id: value.id,
+    order: value.order,
+    timingText: isNullableString(value.timingText) ? value.timingText : null,
+    beatStart: typeof value.beatStart === 'number' ? value.beatStart : null,
+    beatEnd: typeof value.beatEnd === 'number' ? value.beatEnd : null,
+    pulseLabels,
     cells,
-    ...(typeof value.note === 'string' ? { note: value.note } : {}),
-    ...(typeof value.beatCount === 'number' ? { beatCount: value.beatCount } : {}),
   };
 };
 
-const normalizeSongRow = (value: unknown): SongRow | null => {
+const normalizeSongChartBarDto = (
+  value: unknown,
+  stringNames: string[],
+): SongChartBarDto | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.id !== 'string' || !Array.isArray(value.events)) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    note: isNullableString(value.note) ? value.note : null,
+    events: value.events
+      .map((event) => normalizeSongChartEventDto(event, stringNames))
+      .filter(Boolean) as SongChartEventDto[],
+  };
+};
+
+const normalizeSongChartRowDto = (
+  value: unknown,
+  stringNames: string[],
+): SongChartRowDto | null => {
   if (!isRecord(value) || typeof value.id !== 'string') {
     return null;
   }
 
   const bars = Array.isArray(value.bars)
-    ? (value.bars.map(normalizeSongBar).filter(Boolean) as SongBar[])
+    ? (value.bars.map((bar) => normalizeSongChartBarDto(bar, stringNames)).filter(Boolean) as SongChartBarDto[])
     : [];
 
   return {
     id: value.id,
-    label: typeof value.label === 'string' ? value.label : '',
-    beforeText: typeof value.beforeText === 'string' ? value.beforeText : '',
-    afterText: typeof value.afterText === 'string' ? value.afterText : '',
+    label: isNullableString(value.label) ? value.label : null,
+    beforeText: isNullableString(value.beforeText) ? value.beforeText : null,
+    afterText: isNullableString(value.afterText) ? value.afterText : null,
     bars,
-    ...(typeof value.defaultBeatCount === 'number' ? { defaultBeatCount: value.defaultBeatCount } : {}),
+  };
+};
+
+const normalizeSongChartDto = (value: unknown): SongChartDto | null => {
+  if (!isRecord(value) || value.schemaVersion !== 2 || !isStringArray(value.stringNames)) {
+    return null;
+  }
+  const stringNames = value.stringNames;
+
+  const rows = Array.isArray(value.rows)
+    ? (value.rows.map((row) => normalizeSongChartRowDto(row, stringNames)).filter(Boolean) as SongChartRowDto[])
+    : [];
+
+  if (Array.isArray(value.rows) && rows.length !== value.rows.length) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 2,
+    stringNames,
+    rows,
   };
 };
 
@@ -922,27 +1063,27 @@ export const parseSongDto = (value: unknown): SongDto => {
     throw new Error('Invalid song response payload.');
   }
 
-  const stringNames = isStringArray(chart.stringNames) ? chart.stringNames : [];
-  const rows = Array.isArray(chart.rows)
-    ? (chart.rows.map(normalizeSongRow).filter(Boolean) as SongRow[])
-    : [];
+  const normalizedChart = normalizeSongChartDto(chart);
+  if (!normalizedChart) {
+    throw new Error('Invalid song response payload.');
+  }
   const resolvedStringCount =
     typeof value.stringCount === 'number'
       ? value.stringCount
-      : stringNames.length || 4;
+      : normalizedChart.stringNames.length || 4;
 
   return {
     id: value.id,
     title: typeof value.title === 'string' ? value.title : '',
     artist: typeof value.artist === 'string' ? value.artist : '',
     authorComment: isNullableString(value.authorComment) ? value.authorComment : null,
-    key: typeof value.key === 'string' ? value.key : 'E',
-    tuning: typeof value.tuning === 'string' ? value.tuning : 'EADG',
+    key: isNullableString(value.key) ? value.key : null,
+    tuning: isNullableString(value.tuning) ? value.tuning : null,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
     stringCount: resolvedStringCount,
     importedPublishedSongId:
       typeof value.importedPublishedSongId === 'string' ? value.importedPublishedSongId : null,
-    chart: { stringNames, rows },
+    chart: normalizedChart,
   };
 };
 

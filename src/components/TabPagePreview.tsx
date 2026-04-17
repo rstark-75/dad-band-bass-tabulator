@@ -20,13 +20,15 @@ import {
   getBarSlotCount,
 } from '../utils/tabLayout';
 import { getNoteRenderStyle, isEmptySlotValue, isNumericTabValue } from '../utils/tabPreviewTimeline';
+import { SongBar, SongBarEvent, SongRow } from '../types/models';
 
 export type TabPreviewRenderMode = 'ascii' | 'svg';
 export type TabPreviewSvgScaleProfile = 'standard' | 'performance';
 
 interface TabPreviewContentProps {
   stringNames: string[];
-  bars: ParsedBar[];
+  bars?: ParsedBar[];
+  songRows?: SongRow[];
   rowAnnotations?: TabRowAnnotation[];
   rowBarCounts?: number[];
   barsPerRow?: number;
@@ -57,6 +59,63 @@ const monoFontFamily =
     android: 'monospace',
     default: 'monospace',
   }) ?? 'monospace';
+
+const EMPTY_PULSE_TOKEN = '--';
+
+const normalizePulseToken = (value: string | undefined): string => {
+  const trimmed = value?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : EMPTY_PULSE_TOKEN;
+};
+
+const getSortedBarEvents = (bar: SongBar): SongBarEvent[] => {
+  const events = Array.isArray(bar.events) ? [...bar.events] : [];
+  return events.sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+};
+
+const getEventPulseCount = (event: SongBarEvent): number =>
+  Math.max(
+    1,
+    event.pulseLabels.length,
+    ...Object.values(event.cells).map((eventCells) => eventCells?.[0]?.segments.length ?? 0),
+  );
+
+const buildLegacyBarsFromSongRows = (stringNames: string[], songRows: SongRow[]): ParsedBar[] =>
+  songRows.flatMap((row) =>
+    row.bars.map((bar) => {
+      if (!bar.events || bar.events.length === 0) {
+        return {
+          cells: Object.fromEntries(
+            stringNames.map((stringName) => [stringName, [...(bar.cells[stringName] ?? [])]]),
+          ),
+          ...(typeof bar.beatCount === 'number' ? { beatCount: bar.beatCount } : {}),
+        };
+      }
+
+      const orderedEvents = getSortedBarEvents(bar);
+      const cells: Record<string, string[]> = Object.fromEntries(stringNames.map((stringName) => [stringName, []]));
+
+      for (const event of orderedEvents) {
+        const pulseCount = getEventPulseCount(event);
+
+        for (const stringName of stringNames) {
+          const segments = event.cells[stringName]?.[0]?.segments ?? [];
+          for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex += 1) {
+            cells[stringName].push(normalizePulseToken(segments[pulseIndex]));
+          }
+        }
+      }
+
+      return { cells };
+    }),
+  );
+
+const buildRowAnnotationsFromSongRows = (songRows: SongRow[]): TabRowAnnotation[] =>
+  songRows.map((row) => ({
+    label: row.label ?? '',
+    beforeText: row.beforeText ?? '',
+    afterText: row.afterText ?? '',
+    barNotes: row.bars.map((bar) => bar.note ?? ''),
+  }));
 const slotToSegment = (value: string): string => {
   if (!value || isEmptySlotValue(value)) {
     return '--';
@@ -156,10 +215,42 @@ const resolveRowBarCounts = (
     : Array.from({ length: Math.max(1, Math.ceil(bars.length / barsPerRow)) }, () => barsPerRow);
 
 export function TabPagePreview({ renderMode = 'ascii', ...contentProps }: TabPagePreviewProps) {
+  const bars =
+    contentProps.bars ??
+    (contentProps.songRows
+      ? buildLegacyBarsFromSongRows(contentProps.stringNames, contentProps.songRows)
+      : []);
+  const rowAnnotations =
+    contentProps.rowAnnotations ??
+    (contentProps.songRows ? buildRowAnnotationsFromSongRows(contentProps.songRows) : []);
+  const rowBarCounts =
+    contentProps.rowBarCounts ??
+    (contentProps.songRows ? contentProps.songRows.map((row) => row.bars.length) : undefined);
+  const hasEventBackedRows = (contentProps.songRows ?? []).some((row) =>
+    row.bars.some((bar) => Array.isArray(bar.events) && bar.events.length > 0),
+  );
+
   return renderMode === 'svg' ? (
-    <SvgTabPagePreview {...contentProps} />
+    <SvgTabPagePreview
+      {...contentProps}
+      bars={bars}
+      rowAnnotations={rowAnnotations}
+      rowBarCounts={rowBarCounts}
+    />
   ) : (
-    <AsciiTabPagePreview {...contentProps} />
+    hasEventBackedRows && contentProps.songRows ? (
+      <AsciiTabPagePreviewV2
+        {...contentProps}
+        songRows={contentProps.songRows}
+      />
+    ) : (
+      <AsciiTabPagePreview
+        {...contentProps}
+        bars={bars}
+        rowAnnotations={rowAnnotations}
+        rowBarCounts={rowBarCounts}
+      />
+    )
   );
 }
 
@@ -205,9 +296,171 @@ const renderQuaverFlag = (stemX: number, stemTop: number, accentColor: string) =
   />
 );
 
+function AsciiTabPagePreviewV2({
+  stringNames,
+  songRows = [],
+  tone = 'light',
+  compact = false,
+  style,
+}: TabPreviewContentProps) {
+  const isDark = tone === 'dark';
+  const labelWidth = Math.max(1, ...stringNames.map((stringName) => stringName.length));
+  const barStartColumns = labelWidth + 1;
+
+  return (
+    <View style={[styles.preview, style]}>
+      {songRows.map((row, rowIndex) => {
+        const rowBars = row.bars;
+
+        return (
+          <View key={`preview-v2-row-${row.id || rowIndex}`} style={styles.rowBlock}>
+            {row.label?.trim() ? (
+              <Text
+                style={[
+                  compact ? styles.compactBlockLabel : styles.blockLabel,
+                  isDark ? styles.darkMetaText : styles.lightMetaText,
+                ]}
+              >
+                {row.label.trim()}
+              </Text>
+            ) : null}
+
+            {row.beforeText?.trim() ? (
+              <AnnotationLine
+                value={row.beforeText}
+                compact={compact}
+                dark={isDark}
+                mode="ascii"
+                prefixChars={barStartColumns}
+              />
+            ) : null}
+
+            {row.bars.some((bar) => (bar.note ?? '').trim().length > 0) ? (
+              <Text
+                style={[
+                  compact ? styles.compactTabText : styles.tabText,
+                  isDark ? styles.darkAnnotationText : styles.lightAnnotationText,
+                ]}
+              >
+                {renderAsciiV2BarNotes(rowBars, barStartColumns, stringNames)}
+              </Text>
+            ) : null}
+
+            <Text
+              style={[
+                compact ? styles.compactTabText : styles.tabText,
+                isDark ? styles.darkTabText : styles.lightTabText,
+              ]}
+            >
+              {`${' '.repeat(barStartColumns)}${joinRenderedBars(rowBars.map((bar) => renderAsciiV2TimingBar(bar, stringNames)))}`}
+            </Text>
+
+            {stringNames.map((stringName) => (
+              <Text
+                key={`preview-v2-row-${row.id || rowIndex}-${stringName}`}
+                style={[
+                  compact ? styles.compactTabText : styles.tabText,
+                  isDark ? styles.darkTabText : styles.lightTabText,
+                ]}
+              >
+                {`${stringName.padEnd(labelWidth)} ${joinRenderedBars(rowBars.map((bar) => renderAsciiV2StringBar(bar, stringName, stringNames)))}`}
+              </Text>
+            ))}
+
+            {row.afterText?.trim() ? (
+              <AnnotationLine
+                value={row.afterText}
+                compact={compact}
+                dark={isDark}
+                mode="ascii"
+                prefixChars={barStartColumns}
+              />
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const buildAsciiV2Event = (
+  event: SongBarEvent,
+  stringNames: string[],
+): {
+  pulseLabels: string[];
+  pulseTokensByString: Record<string, string[]>;
+  pulseWidths: number[];
+} => {
+  const pulseCount = getEventPulseCount(event);
+  const pulseLabels = Array.from({ length: pulseCount }, (_, pulseIndex) =>
+    event.pulseLabels[pulseIndex] ?? '',
+  );
+  const pulseTokensByString: Record<string, string[]> = {};
+
+  for (const stringName of stringNames) {
+    const source = event.cells[stringName]?.[0]?.segments ?? [];
+    pulseTokensByString[stringName] = Array.from({ length: pulseCount }, (_, pulseIndex) =>
+      normalizePulseToken(source[pulseIndex]),
+    );
+  }
+
+  const pulseWidths = Array.from({ length: pulseCount }, (_, pulseIndex) =>
+    Math.max(
+      1,
+      pulseLabels[pulseIndex]?.length ?? 0,
+      ...stringNames.map((stringName) => pulseTokensByString[stringName]?.[pulseIndex]?.length ?? 0),
+    ),
+  );
+
+  return { pulseLabels, pulseTokensByString, pulseWidths };
+};
+
+const renderAsciiV2TimingBar = (bar: SongBar, stringNames: string[]): string => {
+  const orderedEvents = getSortedBarEvents(bar);
+  const events = orderedEvents.map((event) => buildAsciiV2Event(event, stringNames));
+  const body = events
+    .map((event) =>
+      event.pulseLabels
+        .map((label, pulseIndex) => label.padEnd(event.pulseWidths[pulseIndex], ' '))
+        .join(''),
+    )
+    .join('');
+
+  return `|${body}|`;
+};
+
+const renderAsciiV2StringBar = (bar: SongBar, stringName: string, stringNames: string[]): string => {
+  const orderedEvents = getSortedBarEvents(bar);
+  const events = orderedEvents.map((event) => buildAsciiV2Event(event, stringNames));
+  const body = events
+    .map((event) =>
+      event.pulseTokensByString[stringName]
+        .map((token, pulseIndex) => token.padEnd(event.pulseWidths[pulseIndex], ' '))
+        .join(''),
+    )
+    .join('');
+
+  return `|${body}|`;
+};
+
+const renderAsciiV2BarNotes = (rowBars: SongBar[], prefixChars: number, stringNames: string[]): string => {
+  const prefix = prefixChars > 0 ? ' '.repeat(prefixChars) : '';
+  const rendered = joinRenderedBars(
+    rowBars.map((bar) => {
+      const barTextWidth = getSortedBarEvents(bar)
+        .map((event) => buildAsciiV2Event(event, stringNames).pulseWidths.reduce((sum, width) => sum + width, 0))
+        .reduce((sum, width) => sum + width, 0);
+      const note = (bar.note ?? '').trim();
+      return `|${note.slice(0, barTextWidth).padEnd(barTextWidth, ' ')}|`;
+    }),
+  );
+
+  return `${prefix}${rendered}`;
+};
+
 function AsciiTabPagePreview({
   stringNames,
-  bars,
+  bars = [],
   rowAnnotations = [],
   rowBarCounts,
   barsPerRow = 4,
@@ -403,7 +656,7 @@ const SVG_SCALE_PROFILES: Record<
 
 function SvgTabPagePreview({
   stringNames,
-  bars,
+  bars = [],
   rowAnnotations = [],
   rowBarCounts,
   barsPerRow = 4,

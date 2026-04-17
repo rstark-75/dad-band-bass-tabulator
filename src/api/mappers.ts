@@ -1,21 +1,174 @@
-import { Setlist, Song } from '../types/models';
-import { PlaylistDto, SongChartDto, SongDto, SongMetadataDto } from './contracts';
+import { Setlist, Song, SongBarEvent, SongRow } from '../types/models';
+import { createId } from '../utils/ids';
+import {
+  PlaylistDto,
+  SongChartCellDto,
+  SongChartDto,
+  SongChartEventDto,
+  SongChartRowDto,
+  SongDto,
+  SongMetadataDto,
+} from './contracts';
+
+const EMPTY_SEGMENT = '--';
+
+const toNullableText = (value: string | null | undefined): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeSegment = (value: string | undefined): string => {
+  const trimmed = value?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : EMPTY_SEGMENT;
+};
+
+const normalizeSegmentsToPulseLength = (segments: string[], pulseCount: number): string[] => {
+  const next = segments.slice(0, pulseCount).map((segment) => normalizeSegment(segment));
+
+  while (next.length < pulseCount) {
+    next.push(EMPTY_SEGMENT);
+  }
+
+  return next;
+};
+
+const getEventPulseCount = (event: SongBarEvent): number =>
+  Math.max(
+    1,
+    event.pulseLabels.length,
+    ...Object.values(event.cells).map((eventCells) => eventCells?.[0]?.segments.length ?? 0),
+  );
+
+const buildLegacyCellsFromEvents = (
+  stringNames: string[],
+  events: SongChartEventDto[],
+): Record<string, string[]> => {
+  const cells: Record<string, string[]> = Object.fromEntries(
+    stringNames.map((stringName) => [stringName, []]),
+  );
+
+  for (const event of events) {
+    const pulseCount = Math.max(1, event.pulseLabels.length);
+    for (const stringName of stringNames) {
+      const sourceSegments = event.cells[stringName]?.[0]?.segments ?? [];
+      for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex += 1) {
+        cells[stringName].push(normalizeSegment(sourceSegments[pulseIndex]));
+      }
+    }
+  }
+
+  return cells;
+};
+
+const toChartEventFromLegacyCells = (
+  stringNames: string[],
+  row: SongRow,
+  barCells: Record<string, string[]>,
+): SongChartEventDto[] => {
+  const slotCount = Math.max(0, ...stringNames.map((stringName) => barCells[stringName]?.length ?? 0));
+  const eventCount = Math.max(1, Math.ceil(slotCount / 2));
+
+  return Array.from({ length: eventCount }, (_, eventIndex) => {
+    const start = eventIndex * 2;
+    const end = Math.min(start + 2, slotCount);
+    const pulseLabels = [String(eventIndex + 1), '&'].slice(0, Math.max(1, end - start));
+    const cells: Record<string, SongChartCellDto[]> = Object.fromEntries(
+      stringNames.map((stringName) => {
+        const segments = normalizeSegmentsToPulseLength((barCells[stringName] ?? []).slice(start, end), pulseLabels.length);
+        const isEmpty = segments.every((segment) => segment === EMPTY_SEGMENT);
+        return [
+          stringName,
+          isEmpty
+            ? []
+            : [{ text: segments.join(''), segments }],
+        ];
+      }),
+    );
+
+    return {
+      id: createId('evt'),
+      order: eventIndex + 1,
+      timingText: `${eventIndex + 1}&`,
+      beatStart: eventIndex + 1,
+      beatEnd: eventIndex + 1,
+      pulseLabels,
+      cells,
+    };
+  });
+};
+
+const toChartEvents = (
+  stringNames: string[],
+  row: SongRow,
+  bar: SongRow['bars'][number],
+): SongChartEventDto[] => {
+  if (!bar.events || bar.events.length === 0) {
+    return toChartEventFromLegacyCells(stringNames, row, bar.cells);
+  }
+
+  return bar.events.map((event, index) => {
+    const pulseCount = getEventPulseCount(event);
+    const pulseLabels = Array.from({ length: pulseCount }, (_, pulseIndex) =>
+      event.pulseLabels[pulseIndex] ?? '',
+    );
+    const cells: Record<string, SongChartCellDto[]> = Object.fromEntries(
+      stringNames.map((stringName) => {
+        const sourceCells = event.cells[stringName] ?? [];
+        return [
+          stringName,
+          sourceCells.map((cell) => {
+            const segments = normalizeSegmentsToPulseLength(cell.segments ?? [], pulseLabels.length);
+            return {
+              text: typeof cell.text === 'string' ? cell.text : segments.join(''),
+              segments,
+            };
+          }),
+        ];
+      }),
+    );
+
+    return {
+      id: typeof event.id === 'string' ? event.id : createId('evt'),
+      order: typeof event.order === 'number' ? event.order : index + 1,
+      timingText: toNullableText(event.timingText),
+      beatStart: typeof event.beatStart === 'number' ? event.beatStart : null,
+      beatEnd: typeof event.beatEnd === 'number' ? event.beatEnd : null,
+      pulseLabels,
+      cells,
+    };
+  });
+};
 
 export const toSongMetadataDto = (song: Song): SongMetadataDto => ({
   id: song.id,
   title: song.title,
   artist: song.artist,
-  authorComment: song.authorComment ?? null,
-  key: song.key,
-  tuning: song.tuning,
+  authorComment: toNullableText(song.authorComment),
+  key: toNullableText(song.key),
+  tuning: toNullableText(song.tuning),
   updatedAt: song.updatedAt,
   stringCount: song.stringCount,
   importedPublishedSongId: song.importedPublishedSongId ?? null,
 });
 
-export const toSongChartDto = (song: Song): SongChartDto => ({
-  stringNames: song.stringNames,
-  rows: song.rows,
+export const toSongChartDto = (song: Pick<Song, 'stringNames' | 'rows'>): SongChartDto => ({
+  schemaVersion: 2,
+  stringNames: [...song.stringNames],
+  rows: song.rows.map((row): SongChartRowDto => ({
+    id: row.id,
+    label: toNullableText(row.label),
+    beforeText: toNullableText(row.beforeText),
+    afterText: toNullableText(row.afterText),
+    bars: row.bars.map((bar) => ({
+      id: createId('bar'),
+      note: toNullableText(bar.note),
+      events: toChartEvents(song.stringNames, row, bar),
+    })),
+  })),
 });
 
 export const toSongDto = (song: Song): SongDto => ({
@@ -23,17 +176,42 @@ export const toSongDto = (song: Song): SongDto => ({
   chart: toSongChartDto(song),
 });
 
+const fromSongChartRowDto = (
+  stringNames: string[],
+  row: SongChartRowDto,
+): SongRow => ({
+  id: row.id,
+  label: row.label ?? '',
+  beforeText: row.beforeText ?? '',
+  afterText: row.afterText ?? '',
+  bars: row.bars.map((bar) => ({
+    note: row.bars.length > 0 && bar.note !== null ? bar.note : undefined,
+    events: bar.events.map((event) => ({
+      id: event.id,
+      order: event.order,
+      timingText: event.timingText ?? undefined,
+      beatStart: event.beatStart ?? undefined,
+      beatEnd: event.beatEnd ?? undefined,
+      pulseLabels: [...event.pulseLabels],
+      cells: Object.fromEntries(
+        stringNames.map((stringName) => [stringName, [...(event.cells[stringName] ?? [])]]),
+      ),
+    })),
+    cells: buildLegacyCellsFromEvents(stringNames, bar.events),
+  })),
+});
+
 export const fromSongDto = (dto: SongDto): Song => ({
   id: dto.id,
   title: dto.title,
   artist: dto.artist,
   authorComment: dto.authorComment ?? null,
-  key: dto.key,
-  tuning: dto.tuning,
+  key: dto.key ?? '',
+  tuning: dto.tuning ?? '',
   updatedAt: dto.updatedAt,
   stringCount: dto.stringCount,
   stringNames: dto.chart.stringNames,
-  rows: dto.chart.rows,
+  rows: dto.chart.rows.map((row) => fromSongChartRowDto(dto.chart.stringNames, row)),
   importedPublishedSongId: dto.importedPublishedSongId ?? null,
 });
 

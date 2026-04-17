@@ -12,8 +12,6 @@ import { resolveUpgradeTrigger, useSubscription, useUpgradePrompt } from '../fea
 import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { Song } from '../types/models';
-import { flattenSongRowsToChart } from '../utils/songChart';
-import { parseTab } from '../utils/tabLayout';
 import { useWebPrintStyles } from '../utils/useWebPrintStyles';
 import { appLog } from '../utils/logging';
 
@@ -292,9 +290,6 @@ export function SetlistExportScreen({ navigation }: Props) {
           </View>
 
           {orderedSongs.map((song, index) => {
-            const chart = flattenSongRowsToChart(song);
-            const { stringNames, bars } = parseTab(chart.tab);
-
             return (
               <View
                 nativeID={`setlist-export-page-${index}`}
@@ -320,10 +315,8 @@ export function SetlistExportScreen({ navigation }: Props) {
 
                 <View style={styles.chartBody}>
                   <TabPagePreview
-                    stringNames={stringNames}
-                    bars={bars}
-                    rowAnnotations={chart.rowAnnotations ?? []}
-                    rowBarCounts={chart.rowBarCounts}
+                    stringNames={song.stringNames}
+                    songRows={song.rows}
                     tone="light"
                     compact
                     renderMode={renderMode}

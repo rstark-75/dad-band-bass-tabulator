@@ -14,6 +14,7 @@ import {
   createBassTabApi,
   fromPlaylistDto,
   fromSongDto,
+  toSongChartDto,
   resolveBassTabApiBaseUrlFromEnv,
   type SongMetadataDto,
   type SongDto,
@@ -211,8 +212,8 @@ const toSongFromMetadata = (metadata: SongMetadataDto): Song => {
     title: metadata.title,
     artist: metadata.artist,
     authorComment: metadata.authorComment ?? null,
-    key: metadata.key,
-    tuning: metadata.tuning,
+    key: metadata.key ?? 'E',
+    tuning: metadata.tuning ?? tuningOptions[0],
     updatedAt: metadata.updatedAt,
     stringCount: fallbackStringCount,
     stringNames: buildDefaultStringNames(fallbackStringCount),
@@ -642,14 +643,11 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       await backendApi.createSong({
         title: draftSong.title,
         artist: draftSong.artist,
-        ...(draftSong.authorComment ? { authorComment: draftSong.authorComment } : {}),
-        key: draftSong.key,
-        tuning: draftSong.tuning,
+        ...(draftSong.authorComment ? { authorComment: draftSong.authorComment } : { authorComment: null }),
+        key: draftSong.key || null,
+        tuning: draftSong.tuning || null,
         stringCount: draftSong.stringCount,
-        chart: {
-          stringNames: draftSong.stringNames,
-          rows: draftSong.rows,
-        },
+        chart: toSongChartDto(draftSong),
       }),
     );
 
@@ -818,10 +816,10 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       ...(updates.title !== undefined ? { title: updates.title } : {}),
       ...(updates.artist !== undefined ? { artist: updates.artist } : {}),
       ...(updates.authorComment !== undefined
-        ? { authorComment: updates.authorComment ?? '' }
+        ? { authorComment: updates.authorComment ?? null }
         : {}),
-      ...(updates.key !== undefined ? { key: updates.key } : {}),
-      ...(updates.tuning !== undefined ? { tuning: updates.tuning } : {}),
+      ...(updates.key !== undefined ? { key: updates.key || null } : {}),
+      ...(updates.tuning !== undefined ? { tuning: updates.tuning || null } : {}),
       ...(normalizedUpdates.stringCount !== undefined ? { stringCount: normalizedUpdates.stringCount } : {}),
     };
     const hasMetadataUpdate = Object.keys(metadataPayload).length > 0;
@@ -842,10 +840,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
 
         if (hasChartUpdate) {
           await backendApi.replaceSongChart(songId, {
-            chart: {
-              stringNames: nextSongForSync.stringNames,
-              rows: nextSongForSync.rows,
-            },
+            chart: toSongChartDto(nextSongForSync),
           });
         }
       } catch (error) {
@@ -885,10 +880,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
 
     void backendApi
       .replaceSongChart(songId, {
-        chart: {
-          stringNames: nextSongForSync.stringNames,
-          rows: nextSongForSync.rows,
-        },
+        chart: toSongChartDto(nextSongForSync),
       })
       .catch((error) => {
         appLog.warn('BassTab backend updateSongChart failed', error);
@@ -988,15 +980,12 @@ export function BassTabProvider({ children }: PropsWithChildren) {
           await backendApi.updateSongMetadata(song.id, {
             title: song.title,
             artist: song.artist,
-            ...(song.authorComment ? { authorComment: song.authorComment } : {}),
-            key: song.key,
-            tuning: song.tuning,
+            ...(song.authorComment ? { authorComment: song.authorComment } : { authorComment: null }),
+            key: song.key || null,
+            tuning: song.tuning || null,
           });
           await backendApi.replaceSongChart(song.id, {
-            chart: {
-              stringNames: song.stringNames,
-              rows: song.rows,
-            },
+            chart: toSongChartDto(song),
           });
           continue;
         }
@@ -1005,14 +994,11 @@ export function BassTabProvider({ children }: PropsWithChildren) {
           await backendApi.createSong({
             title: song.title,
             artist: song.artist,
-            ...(song.authorComment ? { authorComment: song.authorComment } : {}),
-            key: song.key,
-            tuning: song.tuning,
+            ...(song.authorComment ? { authorComment: song.authorComment } : { authorComment: null }),
+            key: song.key || null,
+            tuning: song.tuning || null,
             stringCount: song.stringCount,
-            chart: {
-              stringNames: song.stringNames,
-              rows: song.rows,
-            },
+            chart: toSongChartDto(song),
           }),
         );
         createdByLocalId.set(song.id, createdSong);

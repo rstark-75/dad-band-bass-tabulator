@@ -5,8 +5,24 @@ export interface TabRowAnnotation {
   barNotes: string[];
 }
 
+export interface SongEventCell {
+  text: string;
+  segments: string[];
+}
+
+export interface SongBarEvent {
+  id?: string;
+  order?: number;
+  timingText?: string;
+  beatStart?: number;
+  beatEnd?: number;
+  pulseLabels: string[];
+  cells: Record<string, SongEventCell[]>;
+}
+
 export interface SongBar {
   cells: Record<string, string[]>;
+  events?: SongBarEvent[];
   note?: string;
   beatCount?: number;
 }
