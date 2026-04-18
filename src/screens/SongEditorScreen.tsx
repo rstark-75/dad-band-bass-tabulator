@@ -111,7 +111,7 @@ export function SongEditorScreen({ navigation, route }: Props) {
   const backendApi = useMemo(() => createBassTabApiFromEnv(), []);
   const { lookup: publishedLookup } = usePublishedSongLookup(backendApi);
   const { authState } = useAuth();
-  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
+  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.userId : null;
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [hasSavedOnce, setHasSavedOnce] = useState(!isNew);
   const [draftSong, setDraftSong] = useState<Song | null>(null);

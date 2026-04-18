@@ -84,7 +84,7 @@ export function LibraryScreen({ navigation }: Props) {
   const { tier, capabilities } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const { authState } = useAuth();
-  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
+  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.userId : null;
   const {
     songs,
     createSong,

@@ -266,7 +266,7 @@ export function ImportScreen({ navigation }: Props) {
   } = useSubscription();
   const { showUpgradePrompt } = useUpgradePrompt();
   const { authState } = useAuth();
-  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.id : null;
+  const currentUserId = authState.type === 'AUTHENTICATED' ? authState.user.userId : null;
   const currentUserDisplayName = authState.type === 'AUTHENTICATED' ? authState.user.displayName : null;
   const { songs, importSongFromDto } = useBassTab();
   const importedPublishedSongIds = useMemo(
