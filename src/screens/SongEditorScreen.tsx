@@ -320,6 +320,28 @@ export function SongEditorScreen({ navigation, route }: Props) {
         };
       }
 
+      if (updates.rowAnnotations && !updates.tab && !updates.rowBarCounts && !updates.defaultBeatCount) {
+        return {
+          ...current,
+          rows: current.rows.map((row, rowIndex) => {
+            const annotation = updates.rowAnnotations![rowIndex];
+            if (!annotation) return row;
+            return {
+              ...row,
+              label: annotation.label ?? row.label,
+              beforeText: annotation.beforeText ?? row.beforeText,
+              afterText: annotation.afterText ?? row.afterText,
+              bars: row.bars.map((bar, barIndex) => ({
+                ...bar,
+                note: annotation.barNotes?.[barIndex] !== undefined
+                  ? annotation.barNotes[barIndex]
+                  : bar.note,
+              })),
+            };
+          }),
+        };
+      }
+
       const baseChart = flattenSongRowsToChart(current);
       const mergedChart = {
         tab: updates.tab ?? baseChart.tab,
