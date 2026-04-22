@@ -1608,6 +1608,29 @@ function RowEditor({
     onBarsChange(nextBars);
   };
 
+  const getInstructionLines = (text: string): string[] => {
+    const lines = text.split('\n');
+    const targetCount = Math.max(1, stringNames.length);
+    while (lines.length < targetCount) {
+      lines.push('');
+    }
+    return lines.slice(0, targetCount);
+  };
+
+  const updateInstructionLineAt = (rowBarIndex: number, lineIndex: number, value: string) => {
+    const globalBarIndex = row.startBarIndex + rowBarIndex;
+    const target = bars[globalBarIndex];
+
+    if (!target || !isInstructionBar(target)) {
+      return;
+    }
+
+    const lines = getInstructionLines(target.instruction.text);
+    lines[lineIndex] = value.replace(/\n/g, ' ');
+    const combined = lines.join('\n').replace(/\n+$/g, '');
+    updateInstructionTextAt(rowBarIndex, combined);
+  };
+
   const insertAfterSelectedBar = () => {
     commitRowMutation(
       insertBar(bars, selectedGlobalBarIndex + 1, stringNames, undefined, defaultBeatCount),
@@ -2196,13 +2219,7 @@ function RowEditor({
                       />
                       <Pressable onPress={() => selectBar(rowBarIndex)} style={styles.barHeaderPressable}>
                         <Text style={styles.barBlockTitle}>Bar {row.startBarIndex + rowBarIndex + 1}</Text>
-                        <Field
-                          label="Instruction Text"
-                          value={bar.instruction.text}
-                          onChangeText={(value) => updateInstructionTextAt(rowBarIndex, value)}
-                          compact
-                          minHeight={42}
-                        />
+                        <Text style={styles.instructionHeaderHint}>Instruction text below</Text>
                       </Pressable>
                     </View>
                   );
@@ -2281,27 +2298,28 @@ function RowEditor({
                   const globalBarIndex = row.startBarIndex + rowBarIndex;
                   const barWidth = rowBarWidths[rowBarIndex] ?? defaultBarWidth;
                   if (isInstructionBar(bar)) {
-                    if (stringIndex === 0) {
-                      return (
-                        <View
-                          key={`${sectionId}-bar-grid-instruction-${globalBarIndex}-${stringName}`}
-                          style={[
-                            styles.barBlock,
-                            styles.instructionBarBlock,
-                            rowBarIndex === activeBarIndex && styles.barBlockSelected,
-                            { width: barWidth, padding: barPadding },
-                          ]}
-                        >
-                          <Text style={styles.instructionBarTitle}>Instruction</Text>
-                          <Text style={styles.instructionBarText}>{bar.instruction.text || 'Add instruction text'}</Text>
-                          {bar.note?.trim() ? (
-                            <Text style={styles.instructionBarNote}>{bar.note}</Text>
-                          ) : null}
-                        </View>
-                      );
-                    }
-
-                    return <View key={`${sectionId}-bar-grid-instruction-spacer-${globalBarIndex}-${stringName}`} style={{ width: barWidth }} />;
+                    const instructionLines = getInstructionLines(bar.instruction.text);
+                    return (
+                      <View
+                        key={`${sectionId}-bar-grid-instruction-editor-${globalBarIndex}-${stringName}`}
+                        style={[
+                          styles.barBlock,
+                          styles.instructionBarBlock,
+                          rowBarIndex === activeBarIndex && styles.barBlockSelected,
+                          { width: barWidth, padding: barPadding },
+                        ]}
+                      >
+                        <TextInput
+                          value={instructionLines[stringIndex] ?? ''}
+                          onChangeText={(value) => updateInstructionLineAt(rowBarIndex, stringIndex, value)}
+                          onFocus={() => selectBar(rowBarIndex)}
+                          multiline={false}
+                          placeholder={stringIndex === 0 ? 'Instruction text' : ''}
+                          placeholderTextColor={palette.textMuted}
+                          style={[styles.instructionGridRowInput, { minHeight: cellSize + 2 }]}
+                        />
+                      </View>
+                    );
                   }
                   const beats = getEditorBeatsForBar(bar, stringNames, defaultBeatCount);
 
@@ -3629,6 +3647,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: palette.textMuted,
+  },
+  instructionGridRowInput: {
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    color: palette.text,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  instructionHeaderHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: palette.textMuted,
+    textAlign: 'center',
   },
   instructionBarBlock: {
     borderColor: '#f59e0b',

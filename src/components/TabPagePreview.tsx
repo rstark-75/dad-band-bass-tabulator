@@ -353,8 +353,40 @@ const resolveRowBarCounts = (
     ? rowBarCounts.filter((count) => count > 0)
     : Array.from({ length: Math.max(1, Math.ceil(bars.length / barsPerRow)) }, () => barsPerRow);
 
+const buildSongRowsFromBarsInput = (
+  stringNames: string[],
+  bars: ParsedBar[],
+  rowAnnotations?: TabRowAnnotation[],
+  rowBarCounts?: number[],
+  barsPerRow = 4,
+): SongRow[] => {
+  const resolvedRowBarCounts = resolveRowBarCounts(bars, rowBarCounts, barsPerRow);
+  let barCursor = 0;
+
+  return resolvedRowBarCounts.map((barCount, rowIndex) => {
+    const rowBars = bars.slice(barCursor, barCursor + barCount) as SongBar[];
+    const annotation = rowAnnotations?.[rowIndex];
+    barCursor += barCount;
+
+    return {
+      id: `preview-row-${rowIndex}`,
+      label: annotation?.label ?? '',
+      beforeText: annotation?.beforeText ?? '',
+      afterText: annotation?.afterText ?? '',
+      bars: rowBars.map((bar, barIndex) => ({
+        ...bar,
+        ...(annotation?.barNotes?.[barIndex] !== undefined
+          ? { note: annotation.barNotes[barIndex] }
+          : {}),
+      })),
+    };
+  });
+};
+
 const hasInstructionBars = (rows: SongRow[]): boolean =>
   rows.some((row) => row.bars.some((bar) => isInstructionBar(bar)));
+
+const getInstructionTextLines = (value: string): string[] => value.split('\n');
 
 function InstructionAwareTabPagePreview({
   stringNames,
@@ -426,16 +458,12 @@ function InstructionAwareTabPagePreview({
                 row.bars.map((bar, barIndex) =>
                   isPlayableBar(bar)
                     ? renderAsciiV2TimingBar(bar, stringNames)
-                    : `|${
-                        (isInstructionBar(bar) ? bar.instruction.text : '')
-                          .slice(0, barWidths[barIndex] ?? 2)
-                          .padEnd(barWidths[barIndex] ?? 2, ' ')
-                      }|`,
+                    : `|${''.padEnd(barWidths[barIndex] ?? 2, ' ')}|`,
                 ),
               )}`}
             </Text>
 
-            {stringNames.map((stringName) => (
+            {stringNames.map((stringName, stringIndex) => (
               <Text
                 key={`instruction-aware-row-${row.id || rowIndex}-${stringName}`}
                 style={[
@@ -447,7 +475,14 @@ function InstructionAwareTabPagePreview({
                   row.bars.map((bar, barIndex) =>
                     isPlayableBar(bar)
                       ? renderAsciiV2StringBar(bar, stringName, stringNames)
-                      : `|${''.padEnd(barWidths[barIndex] ?? 2, ' ')}|`,
+                      : `|${
+                          (isInstructionBar(bar)
+                            ? (getInstructionTextLines(bar.instruction.text)[stringIndex] ?? '')
+                            : ''
+                          )
+                            .slice(0, barWidths[barIndex] ?? 2)
+                            .padEnd(barWidths[barIndex] ?? 2, ' ')
+                        }|`,
                   ),
                 )}`}
               </Text>
@@ -673,6 +708,8 @@ function InstructionAwareSvgTabPagePreview({
                   const centerX = (startX + endX) / 2;
                   const centerY = (stringPositions[0] + stringPositions[stringPositions.length - 1]) / 2;
                   const innerHeight = Math.max(22, stringPositions[stringPositions.length - 1] - stringPositions[0] - 6);
+                  const instructionLines = getInstructionTextLines(bar.instruction.text);
+                  const maxCharsPerLine = Math.max(4, Math.floor((endX - startX - 16) / 7));
 
                   return (
                     <Fragment key={`instruction-svg-overlay-${rowIndex}-${barIndex}`}>
@@ -685,15 +722,17 @@ function InstructionAwareSvgTabPagePreview({
                         ry={8}
                         fill={isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'}
                       />
-                      <SvgText
-                        x={centerX}
-                        y={centerY + 1}
-                        fill={instructionTextColor}
-                        fontSize={11}
-                        textAnchor="middle"
-                      >
-                        {bar.instruction.text}
-                      </SvgText>
+                      {stringNames.map((_, stringIndex) => (
+                        <SvgText
+                          key={`instruction-svg-line-${rowIndex}-${barIndex}-${stringIndex}`}
+                          x={startX + 8}
+                          y={(stringPositions[stringIndex] ?? centerY) + 4}
+                          fill={instructionTextColor}
+                          fontSize={11}
+                        >
+                          {(instructionLines[stringIndex] ?? '').slice(0, maxCharsPerLine)}
+                        </SvgText>
+                      ))}
                       {bar.note?.trim() ? (
                         <SvgText
                           x={centerX}
@@ -890,7 +929,16 @@ function InstructionAwareSvgTabPagePreview({
 }
 
 export function TabPagePreview({ renderMode = 'ascii', ...contentProps }: TabPagePreviewProps) {
-  const sourceSongRows = contentProps.songRows ?? [];
+  const sourceSongRows = contentProps.songRows ??
+    (contentProps.bars
+      ? buildSongRowsFromBarsInput(
+        contentProps.stringNames,
+        contentProps.bars,
+        contentProps.rowAnnotations,
+        contentProps.rowBarCounts,
+        contentProps.barsPerRow,
+      )
+      : []);
   if (sourceSongRows.length > 0 && hasInstructionBars(sourceSongRows)) {
     return renderMode === 'svg'
       ? <InstructionAwareSvgTabPagePreview {...contentProps} songRows={sourceSongRows} />
