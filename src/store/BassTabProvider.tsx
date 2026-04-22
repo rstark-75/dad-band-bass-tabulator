@@ -807,7 +807,10 @@ export function BassTabProvider({ children }: PropsWithChildren) {
   };
 
   const updateSong = (songId: string, updates: Partial<Song>) => {
-    const syncState = { nextSongForSync: null as Song | null };
+    const syncState = {
+      nextSongForSync: null as Song | null,
+      previousSongForDiff: null as Song | null,
+    };
     const inferredStringCount =
       updates.stringCount ?? (updates.stringNames !== undefined ? updates.stringNames.length : undefined);
     const normalizedUpdates =
@@ -817,6 +820,7 @@ export function BassTabProvider({ children }: PropsWithChildren) {
       current.map((song) =>
         song.id === songId
           ? (() => {
+            syncState.previousSongForDiff = song;
             const nextSong = updateTimestamp({ ...song, ...normalizedUpdates });
             syncState.nextSongForSync = nextSong;
             return nextSong;
@@ -826,27 +830,54 @@ export function BassTabProvider({ children }: PropsWithChildren) {
     );
 
     const nextSongForSync = syncState.nextSongForSync;
+    const previousSongForDiff = syncState.previousSongForDiff;
 
     if (!nextSongForSync || !backendApi) {
       return;
     }
 
+    const normalizeOptionalText = (value: string | null | undefined): string | null => {
+      if (typeof value !== 'string') {
+        return null;
+      }
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    };
+
+    const nextAuthorComment = normalizeOptionalText(updates.authorComment ?? null);
+    const prevAuthorComment = normalizeOptionalText(previousSongForDiff?.authorComment ?? null);
+    const nextKey = normalizeOptionalText(updates.key ?? null);
+    const prevKey = normalizeOptionalText(previousSongForDiff?.key ?? null);
+    const nextTuning = normalizeOptionalText(updates.tuning ?? null);
+    const prevTuning = normalizeOptionalText(previousSongForDiff?.tuning ?? null);
+
     const metadataPayload = {
-      ...(updates.title !== undefined ? { title: updates.title } : {}),
-      ...(updates.artist !== undefined ? { artist: updates.artist } : {}),
-      ...(updates.authorComment !== undefined
-        ? { authorComment: updates.authorComment ?? null }
+      ...(updates.title !== undefined && updates.title !== previousSongForDiff?.title
+        ? { title: updates.title }
         : {}),
-      ...(updates.key !== undefined ? { key: updates.key || null } : {}),
-      ...(updates.tuning !== undefined ? { tuning: updates.tuning || null } : {}),
-      ...(normalizedUpdates.stringCount !== undefined ? { stringCount: normalizedUpdates.stringCount } : {}),
+      ...(updates.artist !== undefined && updates.artist !== previousSongForDiff?.artist
+        ? { artist: updates.artist }
+        : {}),
+      ...(updates.authorComment !== undefined && nextAuthorComment !== prevAuthorComment
+        ? { authorComment: nextAuthorComment }
+        : {}),
+      ...(updates.key !== undefined && nextKey !== prevKey
+        ? { key: nextKey }
+        : {}),
+      ...(updates.tuning !== undefined && nextTuning !== prevTuning
+        ? { tuning: nextTuning }
+        : {}),
+      ...(normalizedUpdates.stringCount !== undefined &&
+      normalizedUpdates.stringCount !== previousSongForDiff?.stringCount
+        ? { stringCount: normalizedUpdates.stringCount }
+        : {}),
     };
     const hasMetadataUpdate = Object.keys(metadataPayload).length > 0;
     const hasChartUpdate = updates.stringNames !== undefined || updates.rows !== undefined;
 
     void (async () => {
-      try {
-        if (hasMetadataUpdate) {
+      if (hasMetadataUpdate) {
+        try {
           const updatedMetadata = await backendApi.updateSongMetadata(songId, metadataPayload);
           setSongs((current) =>
             current.map((song) =>
@@ -855,15 +886,19 @@ export function BassTabProvider({ children }: PropsWithChildren) {
                 : song,
             ),
           );
+        } catch (error) {
+          appLog.warn('BassTab backend updateSong metadata failed', error);
         }
+      }
 
-        if (hasChartUpdate) {
+      if (hasChartUpdate) {
+        try {
           await backendApi.replaceSongChart(songId, {
             chart: toSongChartDto(nextSongForSync),
           });
+        } catch (error) {
+          appLog.warn('BassTab backend updateSong chart failed', error);
         }
-      } catch (error) {
-        appLog.warn('BassTab backend updateSong failed', error);
       }
     })();
   };
