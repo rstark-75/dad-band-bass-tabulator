@@ -1,10 +1,13 @@
-import { Setlist, Song, SongBarEvent, SongRow } from '../types/models';
+import { Setlist, Song, SongBar, SongBarEvent, SongRow } from '../types/models';
 import { createId } from '../utils/ids';
+import { isInstructionBar, normalizeBarForEditor } from '../utils/songBars';
 import {
   PlaylistDto,
+  SongChartBarDto,
   SongChartCellDto,
   SongChartDto,
   SongChartEventDto,
+  SongChartInstructionDto,
   SongChartRowDto,
   SongDto,
   SongMetadataDto,
@@ -66,7 +69,6 @@ const buildLegacyCellsFromEvents = (
 
 const toChartEventFromLegacyCells = (
   stringNames: string[],
-  row: SongRow,
   barCells: Record<string, string[]>,
 ): SongChartEventDto[] => {
   const slotCount = Math.max(0, ...stringNames.map((stringName) => barCells[stringName]?.length ?? 0));
@@ -103,14 +105,15 @@ const toChartEventFromLegacyCells = (
 
 const toChartEvents = (
   stringNames: string[],
-  row: SongRow,
   bar: SongRow['bars'][number],
 ): SongChartEventDto[] => {
-  if (!bar.events || bar.events.length === 0) {
-    return toChartEventFromLegacyCells(stringNames, row, bar.cells);
+  const barEvents = Array.isArray((bar as SongBar).events) ? ((bar as SongBar).events ?? []) : [];
+
+  if (barEvents.length === 0) {
+    return toChartEventFromLegacyCells(stringNames, bar.cells);
   }
 
-  return bar.events.map((event, index) => {
+  return barEvents.map((event, index) => {
     const pulseCount = getEventPulseCount(event);
     const pulseLabels = Array.from({ length: pulseCount }, (_, pulseIndex) =>
       event.pulseLabels[pulseIndex] ?? '',
@@ -143,6 +146,40 @@ const toChartEvents = (
   });
 };
 
+const toInstructionDto = (bar: SongBar): SongChartInstructionDto | null => {
+  if (!isInstructionBar(bar)) {
+    return null;
+  }
+
+  return {
+    ...(bar.instruction as Record<string, unknown>),
+    kind: 'TEXT',
+    text: bar.instruction.text,
+  };
+};
+
+const toChartBarDto = (stringNames: string[], bar: SongBar): SongChartBarDto => {
+  const id = typeof bar.id === 'string' ? bar.id : createId('bar');
+
+  if (isInstructionBar(bar)) {
+    const instruction = toInstructionDto(bar);
+
+    return {
+      id,
+      type: 'INSTRUCTION',
+      note: toNullableText(bar.note),
+      instruction: instruction ?? { kind: 'TEXT', text: '' },
+    };
+  }
+
+  return {
+    id,
+    type: 'PLAYABLE',
+    note: toNullableText(bar.note),
+    events: toChartEvents(stringNames, bar),
+  };
+};
+
 export const toSongMetadataDto = (song: Song): SongMetadataDto => ({
   id: song.id,
   title: song.title,
@@ -163,11 +200,7 @@ export const toSongChartDto = (song: Pick<Song, 'stringNames' | 'rows'>): SongCh
     label: toNullableText(row.label),
     beforeText: toNullableText(row.beforeText),
     afterText: toNullableText(row.afterText),
-    bars: row.bars.map((bar) => ({
-      id: createId('bar'),
-      note: toNullableText(bar.note),
-      events: toChartEvents(song.stringNames, row, bar),
-    })),
+    bars: row.bars.map((bar) => toChartBarDto(song.stringNames, bar)),
   })),
 });
 
@@ -185,19 +218,38 @@ const fromSongChartRowDto = (
   beforeText: row.beforeText ?? '',
   afterText: row.afterText ?? '',
   bars: row.bars.map((bar) => ({
-    note: row.bars.length > 0 && bar.note !== null ? bar.note : undefined,
-    events: bar.events.map((event) => ({
-      id: event.id,
-      order: event.order,
-      timingText: event.timingText ?? undefined,
-      beatStart: event.beatStart ?? undefined,
-      beatEnd: event.beatEnd ?? undefined,
-      pulseLabels: [...event.pulseLabels],
-      cells: Object.fromEntries(
-        stringNames.map((stringName) => [stringName, [...(event.cells[stringName] ?? [])]]),
-      ),
-    })),
-    cells: buildLegacyCellsFromEvents(stringNames, bar.events),
+    ...(normalizeBarForEditor(
+      bar.type === 'INSTRUCTION'
+        ? {
+            id: bar.id,
+            type: 'INSTRUCTION',
+            note: row.bars.length > 0 && bar.note !== null ? bar.note : undefined,
+            instruction: {
+              ...(bar.instruction as Record<string, unknown>),
+              kind: 'TEXT',
+              text: bar.instruction.text,
+            },
+            cells: Object.fromEntries(stringNames.map((stringName) => [stringName, []])),
+          }
+        : {
+            id: bar.id,
+            type: 'PLAYABLE',
+            note: row.bars.length > 0 && bar.note !== null ? bar.note : undefined,
+            events: (bar.events ?? []).map((event) => ({
+              id: event.id,
+              order: event.order,
+              timingText: event.timingText ?? undefined,
+              beatStart: event.beatStart ?? undefined,
+              beatEnd: event.beatEnd ?? undefined,
+              pulseLabels: [...event.pulseLabels],
+              cells: Object.fromEntries(
+                stringNames.map((stringName) => [stringName, [...(event.cells[stringName] ?? [])]]),
+              ),
+            })),
+            cells: buildLegacyCellsFromEvents(stringNames, bar.events ?? []),
+          },
+      stringNames,
+    )),
   })),
 });
 

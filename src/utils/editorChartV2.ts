@@ -1,5 +1,6 @@
 import { SongBar, SongBarEvent } from '../types/models';
 import { DEFAULT_BEAT_COUNT, normalizeBeatCount } from './tabLayout';
+import { isInstructionBar } from './songBars';
 
 export const EDITOR_EMPTY_SLOT = '--';
 
@@ -99,6 +100,21 @@ export const projectSongBarToEditorBar = (
   stringNames: string[],
   fallbackBeatCount = DEFAULT_BEAT_COUNT,
 ): EditorBar => {
+  if (isInstructionBar(bar)) {
+    return {
+      note: bar.note,
+      beats: buildLegacyBeats(
+        {
+          ...bar,
+          type: 'PLAYABLE',
+          events: [],
+        },
+        stringNames,
+        fallbackBeatCount,
+      ),
+    };
+  }
+
   if (!Array.isArray(bar.events) || bar.events.length === 0) {
     return {
       note: bar.note,
@@ -184,6 +200,7 @@ export const projectEditorBarToSongBar = (
   );
 
   return {
+    type: 'PLAYABLE',
     ...(editorBar.note !== undefined ? { note: editorBar.note } : {}),
     beatCount: editorBar.beats.length,
     events,

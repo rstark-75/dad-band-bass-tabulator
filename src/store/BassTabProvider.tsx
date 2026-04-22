@@ -31,6 +31,7 @@ import { createId } from '../utils/ids';
 import { appLog } from '../utils/logging';
 import { loadSnapshotFile, saveSnapshotFile, stateStorageLabel } from '../utils/stateSnapshot';
 import { mergeChartIntoSongRows } from '../utils/songChart';
+import { normalizeBarForEditor } from '../utils/songBars';
 import { DEFAULT_BEAT_COUNT, getSlotsPerBar, parseTab } from '../utils/tabLayout';
 
 interface SongInput {
@@ -147,6 +148,8 @@ const createEmptyRow = (
   afterText: '',
   defaultBeatCount: DEFAULT_BEAT_COUNT,
   bars: Array.from({ length: 4 }, () => ({
+    id: createId('bar'),
+    type: 'PLAYABLE' as const,
     beatCount: DEFAULT_BEAT_COUNT,
     cells: {
       ...Object.fromEntries(
@@ -156,6 +159,7 @@ const createEmptyRow = (
         ]),
       ),
     },
+    events: [],
     note: '',
   })),
 });
@@ -251,6 +255,21 @@ const migrateLegacySong = (legacySong: Song | LegacySong): Song => {
       ...currentSong,
       stringCount: inferredStringCount,
       authorComment: currentSong.authorComment ?? null,
+      rows: currentSong.rows.map((row) => ({
+        ...row,
+        bars: row.bars.map((bar) =>
+          normalizeBarForEditor(
+            {
+              ...(bar as SongRow['bars'][number]),
+              ...(typeof (bar as SongRow['bars'][number]).id === 'string'
+                ? {}
+                : { id: createId('bar') }),
+            },
+            currentSong.stringNames,
+            row.defaultBeatCount ?? DEFAULT_BEAT_COUNT,
+          ),
+        ),
+      })),
     };
   }
 

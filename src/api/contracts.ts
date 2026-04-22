@@ -16,11 +16,32 @@ export interface SongChartEventDto {
   cells: Record<string, SongChartCellDto[]>;
 }
 
-export interface SongChartBarDto {
+export type SongChartBarTypeDto = 'PLAYABLE' | 'INSTRUCTION';
+export type SongChartInstructionKindDto = 'TEXT';
+
+export interface SongChartInstructionDto {
+  kind: SongChartInstructionKindDto;
+  text: string;
+  [key: string]: unknown;
+}
+
+export interface SongChartPlayableBarDto {
   id: string;
+  type: 'PLAYABLE';
   note: string | null;
   events: SongChartEventDto[];
+  instruction?: undefined;
 }
+
+export interface SongChartInstructionBarDto {
+  id: string;
+  type: 'INSTRUCTION';
+  note: string | null;
+  instruction: SongChartInstructionDto;
+  events?: SongChartEventDto[];
+}
+
+export type SongChartBarDto = SongChartPlayableBarDto | SongChartInstructionBarDto;
 
 export interface SongChartRowDto {
   id: string;
@@ -287,12 +308,38 @@ const isSongChartBarDto = (value: unknown): value is SongChartBarDto => {
     return false;
   }
 
-  return (
+  const hasValidBase =
     typeof value.id === 'string' &&
-    (typeof value.note === 'string' || value.note === null || typeof value.note === 'undefined') &&
-    Array.isArray(value.events) &&
-    value.events.every((event) => isSongChartEventDto(event))
-  );
+    (typeof value.note === 'string' || value.note === null || typeof value.note === 'undefined');
+
+  if (!hasValidBase) {
+    return false;
+  }
+
+  const barType = value.type;
+
+  if (barType === 'INSTRUCTION') {
+    return (
+      isRecord(value.instruction) &&
+      value.instruction.kind === 'TEXT' &&
+      typeof value.instruction.text === 'string' &&
+      (typeof value.events === 'undefined' ||
+        (Array.isArray(value.events) && value.events.every((event) => isSongChartEventDto(event))))
+    );
+  }
+
+  if (barType === 'PLAYABLE') {
+    return Array.isArray(value.events) && value.events.every((event) => isSongChartEventDto(event));
+  }
+
+  // Backward compatible read: allow missing type and infer downstream.
+  const hasEvents = Array.isArray(value.events) && value.events.every((event) => isSongChartEventDto(event));
+  const hasInstruction =
+    isRecord(value.instruction) &&
+    value.instruction.kind === 'TEXT' &&
+    typeof value.instruction.text === 'string';
+
+  return hasEvents || hasInstruction;
 };
 
 const isSongChartRowDto = (value: unknown): value is SongChartRowDto => {
@@ -1001,16 +1048,65 @@ const normalizeSongChartBarDto = (
     return null;
   }
 
-  if (typeof value.id !== 'string' || !Array.isArray(value.events)) {
+  if (typeof value.id !== 'string') {
+    return null;
+  }
+
+  const note = isNullableString(value.note) ? value.note : null;
+  const hasEvents = Array.isArray(value.events);
+  const normalizedEvents = hasEvents
+    ? ((value.events as unknown[])
+      .map((event) => normalizeSongChartEventDto(event, stringNames))
+      .filter(Boolean) as SongChartEventDto[])
+    : [];
+  const hasInstruction =
+    isRecord(value.instruction) &&
+    value.instruction.kind === 'TEXT' &&
+    typeof value.instruction.text === 'string';
+  const declaredType = value.type;
+  if (declaredType !== 'PLAYABLE' && declaredType !== 'INSTRUCTION') {
+    if (hasInstruction && hasEvents) {
+      return null;
+    }
+
+    if (!hasInstruction && !hasEvents) {
+      return null;
+    }
+  }
+  const inferredType =
+    declaredType === 'PLAYABLE' || declaredType === 'INSTRUCTION'
+      ? declaredType
+      : hasInstruction
+        ? 'INSTRUCTION'
+        : 'PLAYABLE';
+
+  if (inferredType === 'INSTRUCTION') {
+    if (!hasInstruction) {
+      return null;
+    }
+
+    return {
+      id: value.id,
+      type: 'INSTRUCTION',
+      note,
+      instruction: {
+        ...(value.instruction as Record<string, unknown>),
+        kind: 'TEXT',
+        text: (value.instruction as { text: string }).text,
+      },
+      ...(normalizedEvents.length > 0 ? { events: normalizedEvents } : {}),
+    };
+  }
+
+  if (!hasEvents) {
     return null;
   }
 
   return {
     id: value.id,
-    note: isNullableString(value.note) ? value.note : null,
-    events: value.events
-      .map((event) => normalizeSongChartEventDto(event, stringNames))
-      .filter(Boolean) as SongChartEventDto[],
+    type: 'PLAYABLE',
+    note,
+    events: normalizedEvents,
   };
 };
 

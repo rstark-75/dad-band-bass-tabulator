@@ -9,7 +9,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import { palette } from '../constants/colors';
 import {
@@ -21,6 +21,8 @@ import {
 } from '../utils/tabLayout';
 import { getNoteRenderStyle, isEmptySlotValue, isNumericTabValue } from '../utils/tabPreviewTimeline';
 import { SongBar, SongBarEvent, SongRow } from '../types/models';
+import { getSongBarSlotCountFromEvents } from '../utils/editorChartV2';
+import { isInstructionBar, isPlayableBar } from '../utils/songBars';
 
 export type TabPreviewRenderMode = 'ascii' | 'svg';
 export type TabPreviewSvgScaleProfile = 'standard' | 'performance';
@@ -351,7 +353,550 @@ const resolveRowBarCounts = (
     ? rowBarCounts.filter((count) => count > 0)
     : Array.from({ length: Math.max(1, Math.ceil(bars.length / barsPerRow)) }, () => barsPerRow);
 
+const hasInstructionBars = (rows: SongRow[]): boolean =>
+  rows.some((row) => row.bars.some((bar) => isInstructionBar(bar)));
+
+function InstructionAwareTabPagePreview({
+  stringNames,
+  songRows = [],
+  tone = 'light',
+  compact = false,
+  style,
+}: TabPreviewContentProps) {
+  const isDark = tone === 'dark';
+  const labelWidth = Math.max(1, ...stringNames.map((stringName) => stringName.length));
+  const barStartColumns = labelWidth + 1;
+
+  return (
+    <View style={[styles.preview, style]}>
+      {songRows.map((row, rowIndex) => {
+        const defaultBeatCount = row.defaultBeatCount ?? 4;
+        const barWidths = row.bars.map((bar) =>
+          isPlayableBar(bar)
+            ? Math.max(2, renderAsciiV2TimingBar(bar, stringNames).length - 2)
+            : Math.max(2, getSongBarSlotCountFromEvents(bar, stringNames, defaultBeatCount) * 2),
+        );
+        const hasBarNotes = row.bars.some((bar) => (bar.note ?? '').trim().length > 0);
+
+        return (
+          <View key={`instruction-aware-row-${row.id || rowIndex}`} style={styles.rowBlock}>
+            {row.label?.trim() ? (
+              <Text
+                style={[
+                  compact ? styles.compactBlockLabel : styles.blockLabel,
+                  isDark ? styles.darkMetaText : styles.lightMetaText,
+                ]}
+              >
+                {row.label.trim()}
+              </Text>
+            ) : null}
+
+            {row.beforeText?.trim() ? (
+              <AnnotationLine
+                value={row.beforeText}
+                compact={compact}
+                dark={isDark}
+                mode="ascii"
+                prefixChars={barStartColumns}
+              />
+            ) : null}
+
+            {hasBarNotes ? (
+              <Text
+                style={[
+                  compact ? styles.compactTabText : styles.tabText,
+                  isDark ? styles.darkAnnotationText : styles.lightAnnotationText,
+                ]}
+              >
+                {`${' '.repeat(barStartColumns)}${joinRenderedBars(
+                  row.bars.map((bar, barIndex) =>
+                    `|${(bar.note ?? '').slice(0, barWidths[barIndex] ?? 2).padEnd(barWidths[barIndex] ?? 2, ' ')}|`,
+                  ),
+                )}`}
+              </Text>
+            ) : null}
+
+            <Text
+              style={[
+                compact ? styles.compactTabText : styles.tabText,
+                isDark ? styles.darkTabText : styles.lightTabText,
+              ]}
+            >
+              {`${' '.repeat(barStartColumns)}${joinRenderedBars(
+                row.bars.map((bar, barIndex) =>
+                  isPlayableBar(bar)
+                    ? renderAsciiV2TimingBar(bar, stringNames)
+                    : `|${
+                        (isInstructionBar(bar) ? bar.instruction.text : '')
+                          .slice(0, barWidths[barIndex] ?? 2)
+                          .padEnd(barWidths[barIndex] ?? 2, ' ')
+                      }|`,
+                ),
+              )}`}
+            </Text>
+
+            {stringNames.map((stringName) => (
+              <Text
+                key={`instruction-aware-row-${row.id || rowIndex}-${stringName}`}
+                style={[
+                  compact ? styles.compactTabText : styles.tabText,
+                  isDark ? styles.darkTabText : styles.lightTabText,
+                ]}
+              >
+                {`${stringName.padEnd(labelWidth)} ${joinRenderedBars(
+                  row.bars.map((bar, barIndex) =>
+                    isPlayableBar(bar)
+                      ? renderAsciiV2StringBar(bar, stringName, stringNames)
+                      : `|${''.padEnd(barWidths[barIndex] ?? 2, ' ')}|`,
+                  ),
+                )}`}
+              </Text>
+            ))}
+
+            {row.afterText?.trim() ? (
+              <AnnotationLine
+                value={row.afterText}
+                compact={compact}
+                dark={isDark}
+                mode="ascii"
+                prefixChars={barStartColumns}
+              />
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function InstructionAwareSvgTabPagePreview({
+  stringNames,
+  songRows = [],
+  tone = 'light',
+  compact = false,
+  svgScaleProfile = 'standard',
+  svgViewportWidth,
+  style,
+}: TabPreviewContentProps) {
+  const isDark = tone === 'dark';
+  const { width: windowWidth } = useWindowDimensions();
+  const svgScale = SVG_SCALE_PROFILES[svgScaleProfile];
+  const resolvedNotationTopInset = Math.max(
+    svgScale.notationTopInset,
+    SVG_SHORT_BEAT_STEM_Y_OFFSET + svgScale.stemHeight + 2 - svgScale.rowPadding,
+  );
+  const baseSlotAdvance = svgScale.slotWidth + svgScale.slotGap;
+  const fallbackViewportWidth = Math.max(320, windowWidth - 40);
+  const resolvedViewportWidth = svgViewportWidth && svgViewportWidth > 0
+    ? svgViewportWidth
+    : fallbackViewportWidth;
+
+  return (
+    <View style={[styles.preview, style]}>
+      {songRows.map((row, rowIndex) => {
+        const rowBars = row.bars;
+        const defaultBeatCount = row.defaultBeatCount ?? 4;
+        const rowBarSlotCounts = rowBars.map((bar) =>
+          isPlayableBar(bar)
+            ? getSongBarSlotCountFromEvents(bar, stringNames, defaultBeatCount)
+            : Math.max(2, defaultBeatCount * 2),
+        );
+        const rowBarBeatRanges = rowBars.map((bar) =>
+          isPlayableBar(bar) ? getBeatRangesForBar(bar as ParsedBar) : [],
+        );
+        const cumulativeBarOffsets = rowBarSlotCounts.reduce<number[]>((offsets, slotCount, index) => {
+          if (index === 0) {
+            offsets.push(0);
+            return offsets;
+          }
+
+          offsets.push(offsets[index - 1] + rowBarSlotCounts[index - 1]);
+          return offsets;
+        }, []);
+        const totalSlotCount = rowBarSlotCounts.reduce((sum, slotCount) => sum + slotCount, 0);
+        const maxSvgWidth = Math.max(
+          160,
+          resolvedViewportWidth - svgScale.labelColumnWidth - svgScale.rowGap,
+        );
+        const fixedSvgWidth = svgScale.rowPadding * 2 + svgScale.noteMargin;
+        const availableGridWidth = Math.max(1, maxSvgWidth - fixedSvgWidth);
+        const slotAdvance =
+          totalSlotCount > 0
+            ? Math.min(
+              baseSlotAdvance,
+              Math.max(svgScale.minSlotAdvance, availableGridWidth / totalSlotCount),
+            )
+            : baseSlotAdvance;
+        const effectiveSlotWidth = Math.min(svgScale.slotWidth, slotAdvance);
+        const gridWidth = Math.max(1, totalSlotCount) * slotAdvance;
+        const minRowWidth = Math.min(svgScale.minRowWidth, maxSvgWidth);
+        const svgWidth = Math.max(gridWidth + fixedSvgWidth, minRowWidth);
+        const stringPositions =
+          stringNames.length > 0
+            ? stringNames.map(
+              (_, index) => svgScale.rowPadding + resolvedNotationTopInset + index * svgScale.stringSpacing,
+            )
+            : [svgScale.rowPadding];
+        const svgHeight = Math.max(
+          (stringPositions[stringPositions.length - 1] ?? svgScale.rowPadding) + svgScale.rowPadding,
+          svgScale.minRowHeight,
+        );
+
+        const lineColor = isDark ? palette.liveText : palette.border;
+        const lightLineColor = isDark ? '#94a3b8' : '#cbd5e1';
+        const fretColor = isDark ? palette.liveAccent : palette.primary;
+        const accentColor = isDark ? palette.liveAccent : palette.accent;
+        const instructionTitleColor = isDark ? '#fde68a' : '#92400e';
+        const instructionTextColor = isDark ? '#fef3c7' : '#451a03';
+        const instructionNoteColor = isDark ? '#fbbf24' : '#b45309';
+
+        return (
+          <View key={`instruction-svg-row-${row.id || rowIndex}`} style={[styles.rowBlock, styles.svgRow]}>
+            {row.label?.trim() ? (
+              <Text
+                style={[
+                  compact ? styles.compactBlockLabel : styles.blockLabel,
+                  isDark ? styles.darkMetaText : styles.lightMetaText,
+                ]}
+              >
+                {row.label.trim()}
+              </Text>
+            ) : null}
+
+            {row.beforeText?.trim() ? (
+              <AnnotationLine
+                value={row.beforeText}
+                compact={compact}
+                dark={isDark}
+                mode="svg"
+                leftInset={svgScale.labelColumnWidth + svgScale.rowGap + svgScale.rowPadding}
+                svgScaleProfile={svgScaleProfile}
+              />
+            ) : null}
+
+            {row.bars.some((bar) => (bar.note ?? '').trim().length > 0) ? (
+              <BarNotesRow
+                notes={row.bars.map((bar) => bar.note ?? '')}
+                compact={compact}
+                dark={isDark}
+                leftInset={svgScale.labelColumnWidth + svgScale.rowGap + svgScale.rowPadding}
+                barWidths={rowBarSlotCounts.map((slotCount) => slotCount * slotAdvance)}
+                svgScaleProfile={svgScaleProfile}
+              />
+            ) : null}
+
+            <View style={[styles.svgRowContent, { minHeight: svgHeight }]}>
+              <View
+                style={[
+                  styles.svgLabelColumn,
+                  {
+                    height: svgHeight + 4,
+                    width: svgScale.labelColumnWidth,
+                    marginRight: svgScale.rowGap,
+                    paddingTop: resolvedNotationTopInset,
+                  },
+                ]}
+              >
+                {stringNames.map((stringName, stringIndex) => (
+                  <Text
+                    key={`instruction-svg-label-${rowIndex}-${stringIndex}`}
+                    style={[
+                      {
+                        fontSize: compact
+                          ? svgScale.compactLabelFontSize
+                          : svgScale.labelFontSize,
+                        lineHeight: svgScale.labelLineHeight,
+                      },
+                      isDark ? styles.darkMetaText : styles.lightMetaText,
+                    ]}
+                  >
+                    {stringName}
+                  </Text>
+                ))}
+              </View>
+
+              <Svg width={svgWidth} height={svgHeight}>
+                {rowBars.map((bar, barIndex) =>
+                  stringPositions.map((position, stringIndex) => {
+                    const slotOffset = cumulativeBarOffsets[barIndex] ?? 0;
+                    const slotWidth = rowBarSlotCounts[barIndex] ?? 0;
+                    const startX = svgScale.rowPadding + slotOffset * slotAdvance;
+                    const endX = svgScale.rowPadding + (slotOffset + slotWidth) * slotAdvance;
+                    return (
+                      <Line
+                        key={`instruction-svg-string-${rowIndex}-${barIndex}-${stringIndex}`}
+                        x1={startX}
+                        x2={endX}
+                        y1={position}
+                        y2={position}
+                        stroke={isInstructionBar(bar) ? lightLineColor : lineColor}
+                        strokeWidth={SVG_LINE_STROKE}
+                      />
+                    );
+                  }),
+                )}
+
+                {Array.from({ length: rowBars.length + 1 }).map((_, lineIndex) => {
+                  const slotOffset =
+                    lineIndex === rowBars.length
+                      ? totalSlotCount
+                      : cumulativeBarOffsets[lineIndex] ?? 0;
+                  const xPosition = svgScale.rowPadding + slotOffset * slotAdvance;
+                  const leftBar = lineIndex > 0 ? rowBars[lineIndex - 1] : null;
+                  const rightBar = lineIndex < rowBars.length ? rowBars[lineIndex] : null;
+                  const boundaryUsesLight =
+                    (leftBar ? isInstructionBar(leftBar) : false) ||
+                    (rightBar ? isInstructionBar(rightBar) : false);
+
+                  return (
+                    <Line
+                      key={`instruction-svg-barline-${rowIndex}-${lineIndex}`}
+                      x1={xPosition}
+                      x2={xPosition}
+                      y1={stringPositions[0]}
+                      y2={stringPositions[stringPositions.length - 1]}
+                      stroke={boundaryUsesLight ? lightLineColor : lineColor}
+                      strokeWidth={SVG_BAR_STROKE}
+                    />
+                  );
+                })}
+
+                {rowBars.map((bar, barIndex) => {
+                  if (!isInstructionBar(bar)) {
+                    return null;
+                  }
+
+                  const slotOffset = cumulativeBarOffsets[barIndex] ?? 0;
+                  const slotWidth = rowBarSlotCounts[barIndex] ?? 0;
+                  const startX = svgScale.rowPadding + slotOffset * slotAdvance;
+                  const endX = svgScale.rowPadding + (slotOffset + slotWidth) * slotAdvance;
+                  const centerX = (startX + endX) / 2;
+                  const centerY = (stringPositions[0] + stringPositions[stringPositions.length - 1]) / 2;
+                  const innerHeight = Math.max(22, stringPositions[stringPositions.length - 1] - stringPositions[0] - 6);
+
+                  return (
+                    <Fragment key={`instruction-svg-overlay-${rowIndex}-${barIndex}`}>
+                      <Rect
+                        x={startX + 2}
+                        y={centerY - innerHeight / 2}
+                        width={Math.max(12, endX - startX - 4)}
+                        height={innerHeight}
+                        rx={8}
+                        ry={8}
+                        fill={isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)'}
+                      />
+                      <SvgText
+                        x={centerX}
+                        y={centerY + 1}
+                        fill={instructionTextColor}
+                        fontSize={11}
+                        textAnchor="middle"
+                      >
+                        {bar.instruction.text}
+                      </SvgText>
+                      {bar.note?.trim() ? (
+                        <SvgText
+                          x={centerX}
+                          y={centerY + 16}
+                          fill={instructionNoteColor}
+                          fontSize={10}
+                          textAnchor="middle"
+                        >
+                          {bar.note.trim()}
+                        </SvgText>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+
+                {rowBars.flatMap((bar, barIndex) => {
+                  if (!isPlayableBar(bar)) {
+                    return [];
+                  }
+
+                  const beatRanges = rowBarBeatRanges[barIndex] ?? [];
+                  const barSlotOffset = cumulativeBarOffsets[barIndex] ?? 0;
+
+                  return beatRanges.flatMap((beatRange, beatIndex) => {
+                    if (beatRange.split !== 3) {
+                      return [];
+                    }
+
+                    const usedStringIndices = stringNames
+                      .map((stringName, stringIndex) => {
+                        const hasAnyNoteInBeat = Array.from(
+                          { length: beatRange.endSlot - beatRange.startSlot },
+                          (_, pulseOffset) => beatRange.startSlot + pulseOffset,
+                        ).some((slotIndex) => !isEmptySlotValue(bar.cells[stringName]?.[slotIndex] ?? EMPTY_SLOT));
+                        return hasAnyNoteInBeat ? stringIndex : -1;
+                      })
+                      .filter((stringIndex) => stringIndex >= 0);
+
+                    if (usedStringIndices.length === 0) {
+                      return [];
+                    }
+
+                    const lowestUsedStringIndex = Math.max(...usedStringIndices);
+                    const tripletY = (stringPositions[lowestUsedStringIndex] ?? stringPositions[0]) + 7;
+                    const tripletStartX =
+                      svgScale.rowPadding + (barSlotOffset + beatRange.startSlot) * slotAdvance + 7;
+                    const tripletEndX =
+                      svgScale.rowPadding + (barSlotOffset + beatRange.endSlot) * slotAdvance - 7;
+                    const centerX = (tripletStartX + tripletEndX) / 2;
+
+                    return [
+                      <Line
+                        key={`instruction-svg-triplet-line-${rowIndex}-${barIndex}-${beatIndex}`}
+                        x1={tripletStartX}
+                        x2={tripletEndX}
+                        y1={tripletY}
+                        y2={tripletY}
+                        stroke={accentColor}
+                        strokeWidth={SVG_LINE_STROKE}
+                      />,
+                      <SvgText
+                        key={`instruction-svg-triplet-num-${rowIndex}-${barIndex}-${beatIndex}`}
+                        x={centerX}
+                        y={tripletY + SVG_SPLIT_TEXT_OFFSET + 2}
+                        fill={accentColor}
+                        fontSize={9}
+                        textAnchor="middle"
+                        alignmentBaseline="middle"
+                      >
+                        3
+                      </SvgText>,
+                    ];
+                  });
+                })}
+
+                {rowBars.map((bar, barIndex) => {
+                  if (!isPlayableBar(bar)) {
+                    return null;
+                  }
+
+                  return stringNames.map((stringName, stringIndex) =>
+                    (bar.cells[stringName] ?? Array.from({ length: rowBarSlotCounts[barIndex] ?? 0 }, () => EMPTY_SLOT)).map(
+                      (slot, slotIndex) => {
+                        if (isEmptySlotValue(slot)) {
+                          return null;
+                        }
+
+                        const trimmed = slot.trim();
+                        const renderedValue = trimmed.replace(/-+$/g, '') || trimmed;
+                        const isTimedNote = isNumericTabValue(trimmed);
+                        const fretX =
+                          svgScale.rowPadding +
+                          (cumulativeBarOffsets[barIndex] ?? 0) * slotAdvance +
+                          slotIndex * slotAdvance +
+                          effectiveSlotWidth / 2;
+                        const fretY = stringPositions[stringIndex];
+                        const splitForSlot = (rowBarBeatRanges[barIndex] ?? []).find(
+                          (beatRange) => slotIndex >= beatRange.startSlot && slotIndex < beatRange.endSlot,
+                        )?.split ?? 2;
+                        const computedNoteStyle = isTimedNote
+                          ? getNoteRenderStyle({
+                            rowBars,
+                            stringName,
+                            barIndex,
+                            slotIndex,
+                          })
+                          : 'short';
+                        const noteStyle = isTimedNote && splitForSlot === 4 ? 'short' : computedNoteStyle;
+                        const shortBeatStemBaseY = fretY - SVG_SHORT_BEAT_STEM_Y_OFFSET;
+                        const stemTop = shortBeatStemBaseY - svgScale.stemHeight;
+                        const circleCenterY =
+                          noteStyle === 'hold4' || noteStyle === 'hold2'
+                            ? fretY - SVG_CIRCLE_OFFSET + SVG_CIRCLE_Y_NUDGE
+                            : fretY;
+                        const circleRadius =
+                          noteStyle === 'hold4'
+                            ? SVG_HOLD4_RADIUS
+                            : noteStyle === 'hold2'
+                              ? SVG_HOLD2_RADIUS
+                              : 0;
+                        const circleTopY = circleCenterY - circleRadius;
+                        const tailOriginY =
+                          isTimedNote
+                            ? noteStyle === 'short'
+                              ? stemTop
+                              : noteStyle === 'hold2'
+                                ? circleTopY
+                                : undefined
+                            : undefined;
+                        const shouldDrawStem = isTimedNote && (noteStyle === 'short' || noteStyle === 'beat');
+                        const shouldDrawHoldTail = isTimedNote && noteStyle === 'hold2';
+                        const shouldDrawFlag = isTimedNote && noteStyle === 'short' && tailOriginY !== undefined;
+                        const shouldDrawSecondFlag = shouldDrawFlag && splitForSlot === 4;
+                        const stemX =
+                          noteStyle === 'short' || noteStyle === 'beat'
+                            ? fretX + SVG_STEM_X_OFFSET - SVG_SHORT_BEAT_STEM_LEFT_ADJUST
+                            : fretX;
+
+                        return (
+                          <Fragment key={`instruction-svg-fret-${rowIndex}-${barIndex}-${stringName}-${slotIndex}`}>
+                            <SvgText
+                              x={fretX}
+                              y={fretY + SVG_FRET_TEXT_Y_OFFSET}
+                              fill={fretColor}
+                              fontSize={svgScale.fretFontSize}
+                              textAnchor="middle"
+                              alignmentBaseline="middle"
+                            >
+                              {renderedValue}
+                            </SvgText>
+
+                            {shouldDrawStem &&
+                              renderNoteMarker(stemX, shortBeatStemBaseY, accentColor, svgScale.stemHeight)}
+                            {shouldDrawHoldTail &&
+                              renderHoldTail(fretX, circleTopY, accentColor, svgScale.stemHeight)}
+                            {shouldDrawFlag &&
+                              renderQuaverFlag(stemX, tailOriginY, accentColor)}
+                            {shouldDrawSecondFlag &&
+                              renderQuaverFlag(stemX, tailOriginY + SVG_SPLIT_BEAM_GAP, accentColor, 'split4')}
+                            {isTimedNote && (noteStyle === 'hold4' || noteStyle === 'hold2') && (
+                              <Circle
+                                cx={fretX}
+                                cy={circleCenterY}
+                                r={circleRadius}
+                                stroke={accentColor}
+                                strokeWidth={2}
+                                fill="none"
+                              />
+                            )}
+                          </Fragment>
+                        );
+                      },
+                    ),
+                  );
+                })}
+              </Svg>
+            </View>
+
+            {row.afterText?.trim() ? (
+              <AnnotationLine
+                value={row.afterText}
+                compact={compact}
+                dark={isDark}
+                mode="svg"
+                leftInset={svgScale.labelColumnWidth + svgScale.rowGap + svgScale.rowPadding}
+                svgScaleProfile={svgScaleProfile}
+              />
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 export function TabPagePreview({ renderMode = 'ascii', ...contentProps }: TabPagePreviewProps) {
+  const sourceSongRows = contentProps.songRows ?? [];
+  if (sourceSongRows.length > 0 && hasInstructionBars(sourceSongRows)) {
+    return renderMode === 'svg'
+      ? <InstructionAwareSvgTabPagePreview {...contentProps} songRows={sourceSongRows} />
+      : <InstructionAwareTabPagePreview {...contentProps} songRows={sourceSongRows} />;
+  }
+
   const bars =
     contentProps.bars ??
     (contentProps.songRows
@@ -1346,6 +1891,62 @@ const styles = StyleSheet.create({
   },
   lightMetaText: {
     color: '#475569',
+  },
+  instructionAwareBarRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  instructionAwarePlayableCard: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+  },
+  instructionAwarePlayableCardDark: {
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+  },
+  instructionAwareInstructionCard: {
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    borderRadius: 8,
+    backgroundColor: '#fffbeb',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  instructionAwareInstructionCardDark: {
+    borderColor: '#f59e0b',
+    backgroundColor: '#292524',
+  },
+  instructionAwareInstructionTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: '#92400e',
+  },
+  instructionAwareInstructionTitleDark: {
+    color: '#fbbf24',
+  },
+  instructionAwareInstructionText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#451a03',
+  },
+  instructionAwareInstructionTextDark: {
+    color: '#fde68a',
+  },
+  instructionAwareInstructionNote: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#92400e',
+  },
+  instructionAwareInstructionNoteDark: {
+    color: '#f59e0b',
   },
   boldText: {
     fontWeight: '700',

@@ -6,14 +6,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { PrimaryButton } from './PrimaryButton';
 import { useAuth } from '../features/auth/state/useAuth';
 import { findAvatarPreset } from '../features/auth/utils/avatarPresets';
 import { useSubscription } from '../features/subscription';
-import { RootStackParamList } from '../navigation/types';
 
 interface AppSectionNavProps {
   current: 'Home' | 'Library' | 'Setlist' | 'Import' | 'AICreate' | 'GoPro' | 'Account';
@@ -36,7 +33,6 @@ export function AppSectionNav({
   onGoPro,
   onAccount,
 }: AppSectionNavProps) {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { width } = useWindowDimensions();
   const isCompactLayout = width < 760;
   const isVeryCompactLayout = width < 390;
@@ -59,18 +55,6 @@ export function AppSectionNav({
   const navButtonLabelStyle = isVeryCompactLayout ? styles.navRailLabelTiny : undefined;
   const handleSignOut = () => {
     logout();
-    navigation.reset({
-      index: 0,
-      routes: [
-        {
-          name: 'AuthEntry',
-          params: {
-            view: 'LOGIN',
-            source: 'signout',
-          },
-        },
-      ],
-    });
   };
 
   return (

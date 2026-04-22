@@ -1,6 +1,7 @@
 import { createId } from './ids';
 import { DEFAULT_BEAT_COUNT, normalizeBeatCount, parseTab, renderTab } from './tabLayout';
 import { Song, SongChart, SongRow, TabRowAnnotation } from '../types/models';
+import { normalizeBarForEditor } from './songBars';
 
 const defaultBarsPerRow = 4;
 const maxBarsPerRow = 8;
@@ -89,12 +90,21 @@ export const mergeChartIntoSongRows = (
       afterText: annotation.afterText,
       defaultBeatCount,
       bars: nextRowBars.map((bar, barIndex) => ({
-        ...bar,
-        beatCount: normalizeBeatCount(bar.beatCount ?? defaultBeatCount),
-        note:
-          annotation.barNotes[barIndex] !== undefined && annotation.barNotes[barIndex].length > 0
-            ? annotation.barNotes[barIndex]
-            : undefined,
+        ...normalizeBarForEditor(
+          {
+            ...bar,
+            id: createId('bar'),
+            type: 'PLAYABLE',
+            events: [],
+            beatCount: normalizeBeatCount(bar.beatCount ?? defaultBeatCount),
+            note:
+              annotation.barNotes[barIndex] !== undefined && annotation.barNotes[barIndex].length > 0
+                ? annotation.barNotes[barIndex]
+                : undefined,
+          },
+          stringNames,
+          defaultBeatCount,
+        ),
       })),
     };
   });

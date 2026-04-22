@@ -11,6 +11,7 @@ import { RootStackParamList } from '../navigation/types';
 import { useBassTab } from '../store/BassTabProvider';
 import { createId } from '../utils/ids';
 import { appLog } from '../utils/logging';
+import { normalizeBarForEditor } from '../utils/songBars';
 import { parseTab } from '../utils/tabLayout';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ImportPaste'>;
@@ -41,7 +42,7 @@ export function ImportPasteScreen({ navigation }: Props) {
             label: 'Imported Row',
             beforeText: '',
             afterText: '',
-            bars,
+            bars: bars.map((bar) => normalizeBarForEditor(bar, stringNames)),
           },
         ],
       });

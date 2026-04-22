@@ -20,6 +20,14 @@ import {
 import { palette } from '../constants/colors';
 import { SongBar, SongChart, TabRowAnnotation } from '../types/models';
 import { normalizeRowBarCounts } from '../utils/songChart';
+import { createId } from '../utils/ids';
+import {
+  createInstructionBar,
+  createPlayableBar,
+  isInstructionBar,
+  isPlayableBar,
+  normalizeBarForEditor,
+} from '../utils/songBars';
 import {
   DEFAULT_BEAT_COUNT,
   MAX_BEAT_COUNT,
@@ -150,25 +158,27 @@ const getRowBarAndSlotFromAbsolute = (
 };
 
 const createEmptyBar = (stringNames: string[], beatCount = DEFAULT_BEAT_COUNT): SongBar =>
-  projectEditorBarToSongBar(
-    {
-      beats: Array.from({ length: normalizeBeatCount(beatCount) }, (_, beatIndex) => ({
-        beatNumber: beatIndex + 1,
-        split: 2 as EditorBeatSplit,
-        pulseLabels: [],
-        segmentsByString: Object.fromEntries(
-          stringNames.map((stringName) => [
-            stringName,
-            [EDITOR_EMPTY_SLOT, EDITOR_EMPTY_SLOT],
-          ]),
-        ),
-      })),
-    },
-    stringNames,
-  );
+  createPlayableBar(stringNames, beatCount);
 
 const cloneBar = (bar: SongBar, stringNames: string[], defaultBeatCount: number): SongBar =>
-  projectEditorBarToSongBar(projectSongBarToEditorBar(bar, stringNames, defaultBeatCount), stringNames);
+  normalizeBarForEditor(
+    isInstructionBar(bar)
+      ? {
+          ...bar,
+          instruction: {
+            ...bar.instruction,
+            kind: 'TEXT' as const,
+            text: bar.instruction.text,
+          },
+        }
+      : {
+          ...projectEditorBarToSongBar(projectSongBarToEditorBar(bar, stringNames, defaultBeatCount), stringNames),
+          id: bar.id,
+          type: 'PLAYABLE' as const,
+        },
+    stringNames,
+    defaultBeatCount,
+  );
 
 const updateBarCell = (
   bars: SongBar[],
@@ -181,6 +191,10 @@ const updateBarCell = (
 ): SongBar[] =>
   bars.map((bar, currentBarIndex) => {
     if (currentBarIndex !== barIndex) {
+      return bar;
+    }
+
+    if (isInstructionBar(bar)) {
       return bar;
     }
 
@@ -198,7 +212,15 @@ const updateBarCell = (
       remaining -= beat.split;
     }
 
-    return projectEditorBarToSongBar(editorBar, stringNames);
+    return normalizeBarForEditor(
+      {
+        ...projectEditorBarToSongBar(editorBar, stringNames),
+        id: bar.id,
+        type: 'PLAYABLE' as const,
+      },
+      stringNames,
+      defaultBeatCount,
+    );
   });
 
 const insertBar = (
@@ -208,7 +230,8 @@ const insertBar = (
   sourceBar?: SongBar,
   beatCount = DEFAULT_BEAT_COUNT,
 ): SongBar[] => {
-  const nextBar = sourceBar ? cloneBar(sourceBar, stringNames, beatCount) : createEmptyBar(stringNames, beatCount);
+  const clonedBar = sourceBar ? cloneBar(sourceBar, stringNames, beatCount) : createEmptyBar(stringNames, beatCount);
+  const nextBar = { ...clonedBar, id: createId('bar') };
   return [
     ...bars.slice(0, index),
     nextBar,
@@ -270,7 +293,19 @@ export function SectionEditorCard({
     [barsOverride, section.tab, stringNamesOverride],
   );
   const stringNames = stringNamesOverride ?? parsedChart?.stringNames ?? [];
-  const bars = (barsOverride ?? (parsedChart?.bars as SongBar[] | undefined) ?? []) as SongBar[];
+  const bars = useMemo(
+    () => {
+      if (barsOverride) {
+        // Song editor state already stores normalized bars; keep references stable for perf.
+        return barsOverride;
+      }
+
+      return ((parsedChart?.bars as SongBar[] | undefined) ?? []).map((bar) =>
+        normalizeBarForEditor(bar, stringNames, effectiveDefaultBeatCount),
+      );
+    },
+    [barsOverride, effectiveDefaultBeatCount, parsedChart?.bars, stringNames],
+  );
   const rowBarCounts = useMemo(
     () => normalizeRowBarCounts(bars.length, section.rowBarCounts),
     [bars.length, section.rowBarCounts],
@@ -546,8 +581,19 @@ export function SectionEditorCard({
               const duplicateRow = () => {
                 setCopiedBlock({
                   bars: row.bars.map((bar) => ({
+                    id: bar.id,
+                    type: bar.type,
                     beatCount: getBarBeatCount(bar, stringNames, effectiveDefaultBeatCount),
                     ...(bar.note !== undefined ? { note: bar.note } : {}),
+                    ...(isInstructionBar(bar)
+                      ? {
+                          instruction: {
+                            ...bar.instruction,
+                            kind: 'TEXT' as const,
+                            text: bar.instruction.text,
+                          },
+                        }
+                      : {}),
                     ...(Array.isArray(bar.events)
                       ? {
                           events: bar.events.map((event) => ({
@@ -620,7 +666,20 @@ export function SectionEditorCard({
                     return bar;
                   }
 
+                  if (isInstructionBar(bar)) {
+                    return {
+                      ...bar,
+                      instruction: {
+                        ...bar.instruction,
+                        kind: 'TEXT' as const,
+                        text: '',
+                      },
+                    };
+                  }
+
                   return {
+                    id: bar.id,
+                    type: 'PLAYABLE' as const,
                     beatCount: getBarBeatCount(bar, stringNames, effectiveDefaultBeatCount),
                     ...(bar.note !== undefined ? { note: bar.note } : {}),
                     cells: Object.fromEntries(
@@ -1222,7 +1281,20 @@ function RowEditor({
         return bar;
       }
 
+      if (isInstructionBar(bar)) {
+        return {
+          ...bar,
+          instruction: {
+            ...bar.instruction,
+            kind: 'TEXT' as const,
+            text: '',
+          },
+        };
+      }
+
       return {
+        id: bar.id,
+        type: 'PLAYABLE' as const,
         beatCount: getBarBeatCount(bar, stringNames, defaultBeatCount),
         cells: Object.fromEntries(
           stringNames.map((stringName) => [
@@ -1289,7 +1361,10 @@ function RowEditor({
         return bar;
       }
 
-      return cloneBar(nextBar, stringNames, defaultBeatCount);
+      return {
+        ...cloneBar(nextBar, stringNames, defaultBeatCount),
+        id: bar.id,
+      };
     });
 
     onBarsChange(nextBars);
@@ -1424,13 +1499,17 @@ function RowEditor({
         });
       }
 
-      return projectEditorBarToSongBar(
-        {
-          note: bar.note,
-          beats: nextBeats,
-        },
-        stringNames,
-      );
+      return {
+        ...projectEditorBarToSongBar(
+          {
+            note: bar.note,
+            beats: nextBeats,
+          },
+          stringNames,
+        ),
+        id: bar.id,
+        type: 'PLAYABLE' as const,
+      };
     });
 
     onChartChange(nextBars, rowAnnotations, rowBarCounts);
@@ -1472,9 +1551,60 @@ function RowEditor({
     editorBar.beats[beatIndex] = updatedBeat;
     const nextBars = bars.map((bar, currentIndex) =>
       currentIndex === globalBarIndex
-        ? projectEditorBarToSongBar(editorBar, stringNames)
+        ? {
+            ...projectEditorBarToSongBar(editorBar, stringNames),
+            id: bar.id,
+            type: 'PLAYABLE' as const,
+          }
         : bar,
     );
+    onBarsChange(nextBars);
+  };
+
+  const setSelectedBarType = (nextType: 'PLAYABLE' | 'INSTRUCTION') => {
+    const globalBarIndex = selectedGlobalBarIndex;
+    const target = bars[globalBarIndex];
+
+    if (!target || target.type === nextType) {
+      return;
+    }
+
+    const nextBars = bars.map((bar, index) => {
+      if (index !== globalBarIndex) {
+        return bar;
+      }
+
+      if (nextType === 'INSTRUCTION') {
+        return createInstructionBar(stringNames);
+      }
+
+      return createPlayableBar(stringNames, defaultBeatCount);
+    });
+
+    onBarsChange(nextBars);
+  };
+
+  const updateInstructionTextAt = (rowBarIndex: number, value: string) => {
+    const globalBarIndex = row.startBarIndex + rowBarIndex;
+    const target = bars[globalBarIndex];
+
+    if (!target || !isInstructionBar(target)) {
+      return;
+    }
+
+    const nextBars = bars.map((bar, index) =>
+      index === globalBarIndex && isInstructionBar(bar)
+        ? {
+            ...bar,
+            instruction: {
+              ...bar.instruction,
+              kind: 'TEXT' as const,
+              text: value,
+            },
+          }
+        : bar,
+    );
+
     onBarsChange(nextBars);
   };
 
@@ -1517,6 +1647,30 @@ function RowEditor({
 
   const renderSelectedBarToolbar = () => (
     <View style={[styles.barToolbarRow, useMobileCellEditor && styles.barToolbarRowMobile]}>
+      <View style={styles.barTypeControl}>
+        <Text style={styles.barTypeLabel}>Bar Type</Text>
+        <View style={styles.barTypePills}>
+          {(['PLAYABLE', 'INSTRUCTION'] as const).map((typeValue) => (
+            <Pressable
+              key={`bar-type-${typeValue}`}
+              onPress={() => setSelectedBarType(typeValue)}
+              style={[
+                styles.barTypePill,
+                selectedBar.type === typeValue && styles.barTypePillActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.barTypePillText,
+                  selectedBar.type === typeValue && styles.barTypePillTextActive,
+                ]}
+              >
+                {typeValue === 'PLAYABLE' ? 'Playable' : 'Instruction'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
       <View style={[styles.barToolbarCountField, useMobileCellEditor && styles.barToolbarCountFieldMobile]}>
         <RowBarCountField
           label="Bars"
@@ -1619,6 +1773,10 @@ function RowEditor({
   );
 
   const renderBeatSplitControl = () => {
+    if (!isPlayableBar(selectedBar)) {
+      return null;
+    }
+
     if (!selectedBarBeats[activeBeatIndex]) {
       return null;
     }
@@ -1775,6 +1933,20 @@ function RowEditor({
       {useMobileCellEditor ? (
         <View style={styles.mobileEditorStack}>
           {selectedBar ? (
+            isInstructionBar(selectedBar) ? (
+              <View style={styles.instructionEditorCard}>
+                <Text style={styles.instructionEditorTitle}>Instruction Bar</Text>
+                <Field
+                  label="Instruction Text"
+                  value={selectedBar.instruction.text}
+                  onChangeText={(value) => updateInstructionTextAt(activeBarIndex, value)}
+                  minHeight={46}
+                />
+                <Text style={styles.instructionEditorHint}>
+                  Text is required. This bar does not include strings, timing grid, or events.
+                </Text>
+              </View>
+            ) : (
             <View style={styles.mobileSingleBarPanel}>
               <View style={styles.gridRow}>
                 <View style={styles.labelCell} />
@@ -1902,9 +2074,10 @@ function RowEditor({
                 </View>
               ))}
             </View>
+            )
           ) : null}
 
-          {selectedCell ? (
+          {selectedCell && isPlayableBar(selectedBar) ? (
             <View style={styles.mobilePadPanel}>
               <View style={styles.mobilePadHeader}>
                 <Text style={styles.mobilePadTitle}>
@@ -2004,6 +2177,37 @@ function RowEditor({
                 const beats = getEditorBeatsForBar(bar, stringNames, defaultBeatCount);
                 const barWidth = rowBarWidths[rowBarIndex] ?? defaultBarWidth;
 
+                if (isInstructionBar(bar)) {
+                  return (
+                    <View
+                      key={`${sectionId}-row-head-${rowBarIndex}`}
+                      style={[
+                        styles.barBlock,
+                        styles.instructionBarBlock,
+                        rowBarIndex === activeBarIndex && styles.barBlockSelected,
+                        rowBarIndex !== activeBarIndex && styles.barBlockSelectable,
+                        { width: barWidth, padding: barPadding },
+                      ]}
+                    >
+                      <BarInlineNoteField
+                        value={row.annotation.barNotes[rowBarIndex] ?? ''}
+                        onChangeText={(value) => updateBarNoteAt(rowBarIndex, value)}
+                        collapseKey={`${row.rowIndex}-${rowBarIndex}-bar-note`}
+                      />
+                      <Pressable onPress={() => selectBar(rowBarIndex)} style={styles.barHeaderPressable}>
+                        <Text style={styles.barBlockTitle}>Bar {row.startBarIndex + rowBarIndex + 1}</Text>
+                        <Field
+                          label="Instruction Text"
+                          value={bar.instruction.text}
+                          onChangeText={(value) => updateInstructionTextAt(rowBarIndex, value)}
+                          compact
+                          minHeight={42}
+                        />
+                      </Pressable>
+                    </View>
+                  );
+                }
+
                 return (
                 <View
                   key={`${sectionId}-row-head-${rowBarIndex}`}
@@ -2076,6 +2280,29 @@ function RowEditor({
                 {row.bars.map((bar, rowBarIndex) => {
                   const globalBarIndex = row.startBarIndex + rowBarIndex;
                   const barWidth = rowBarWidths[rowBarIndex] ?? defaultBarWidth;
+                  if (isInstructionBar(bar)) {
+                    if (stringIndex === 0) {
+                      return (
+                        <View
+                          key={`${sectionId}-bar-grid-instruction-${globalBarIndex}-${stringName}`}
+                          style={[
+                            styles.barBlock,
+                            styles.instructionBarBlock,
+                            rowBarIndex === activeBarIndex && styles.barBlockSelected,
+                            { width: barWidth, padding: barPadding },
+                          ]}
+                        >
+                          <Text style={styles.instructionBarTitle}>Instruction</Text>
+                          <Text style={styles.instructionBarText}>{bar.instruction.text || 'Add instruction text'}</Text>
+                          {bar.note?.trim() ? (
+                            <Text style={styles.instructionBarNote}>{bar.note}</Text>
+                          ) : null}
+                        </View>
+                      );
+                    }
+
+                    return <View key={`${sectionId}-bar-grid-instruction-spacer-${globalBarIndex}-${stringName}`} style={{ width: barWidth }} />;
+                  }
                   const beats = getEditorBeatsForBar(bar, stringNames, defaultBeatCount);
 
                   return (
@@ -3256,6 +3483,41 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 10,
   },
+  barTypeControl: {
+    gap: 6,
+    minWidth: 210,
+  },
+  barTypeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  barTypePills: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  barTypePill: {
+    minHeight: 30,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  barTypePillActive: {
+    borderColor: palette.primary,
+    backgroundColor: palette.primaryMuted,
+  },
+  barTypePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: palette.textMuted,
+  },
+  barTypePillTextActive: {
+    color: palette.primary,
+  },
   barToolbarCountField: {
     width: 104,
   },
@@ -3349,6 +3611,45 @@ const styles = StyleSheet.create({
   },
   beatSplitPillTextActive: {
     color: palette.primary,
+  },
+  instructionEditorCard: {
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 12,
+    padding: 10,
+    gap: 8,
+    backgroundColor: '#ffffff',
+  },
+  instructionEditorTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: palette.text,
+  },
+  instructionEditorHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: palette.textMuted,
+  },
+  instructionBarBlock: {
+    borderColor: '#f59e0b',
+    backgroundColor: '#fffbeb',
+  },
+  instructionBarTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#92400e',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  instructionBarText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#451a03',
+  },
+  instructionBarNote: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#92400e',
   },
   barFooterSpacer: {
     height: 2,

@@ -20,12 +20,34 @@ export interface SongBarEvent {
   cells: Record<string, SongEventCell[]>;
 }
 
+export type SongBarType = 'PLAYABLE' | 'INSTRUCTION';
+export type SongInstructionKind = 'TEXT';
+
+export interface SongTextInstruction {
+  kind: SongInstructionKind;
+  text: string;
+  // Keep forward-compatibility for future instruction payloads on read.
+  [key: string]: unknown;
+}
+
 export interface SongBar {
+  id?: string;
+  type: SongBarType;
   cells: Record<string, string[]>;
   events?: SongBarEvent[];
   note?: string;
   beatCount?: number;
+  instruction?: SongTextInstruction;
 }
+
+export type SongPlayableBar = SongBar & {
+  type: 'PLAYABLE';
+};
+
+export type SongInstructionBar = SongBar & {
+  type: 'INSTRUCTION';
+  instruction: SongTextInstruction;
+};
 
 export interface SongRow {
   id: string;

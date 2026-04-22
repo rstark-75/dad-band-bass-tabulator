@@ -30,6 +30,11 @@ import { createId } from '../utils/ids';
 import { createBassTabApiFromEnv } from '../api';
 import { usePublishedSongLookup } from '../hooks/usePublishedSongLookup';
 import { appLog } from '../utils/logging';
+import {
+  isInstructionBar,
+  normalizeBarForEditor,
+  validateBar,
+} from '../utils/songBars';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SongEditor'>;
 type SaveState = 'idle' | 'saving' | 'saved';
@@ -60,8 +65,19 @@ const cloneSong = (song: Song): Song => ({
   rows: song.rows.map((row) => ({
     ...row,
     bars: row.bars.map((bar) => ({
+      id: bar.id,
+      type: bar.type,
       ...(bar.beatCount !== undefined ? { beatCount: bar.beatCount } : {}),
       ...(bar.note !== undefined ? { note: bar.note } : {}),
+      ...(isInstructionBar(bar)
+        ? {
+            instruction: {
+              ...bar.instruction,
+              kind: 'TEXT' as const,
+              text: bar.instruction.text,
+            },
+          }
+        : {}),
       ...(Array.isArray(bar.events)
         ? {
             events: bar.events.map((event) => ({
@@ -121,6 +137,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
   const [draftSong, setDraftSong] = useState<Song | null>(null);
   const [saveSignal, setSaveSignal] = useState(0);
   const [configBeatCount, setConfigBeatCount] = useState(DEFAULT_BEAT_COUNT);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const baselineRef = useRef<string>('');
   const activeSongIdRef = useRef<string | null>(null);
   const saveResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,6 +215,10 @@ export function SongEditorScreen({ navigation, route }: Props) {
   }, [editorSong?.stringCount]);
 
   const isNewEmpty = isNew && (editorSong?.rows.length ?? 0) === 0;
+  const flattenedEditorBars = useMemo(
+    () => (editorSong ? editorSong.rows.flatMap((row) => row.bars) : []),
+    [editorSong?.rows],
+  );
   const effectiveDefaultBeatCount = isNewEmpty
     ? configBeatCount
     : normalizeBeatCount(chart?.defaultBeatCount ?? DEFAULT_BEAT_COUNT);
@@ -244,6 +266,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
         };
       });
       setSaveState('idle');
+      setSaveErrorMessage(null);
+      setValidationMessage(null);
       return;
     }
 
@@ -258,6 +282,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
       };
     });
     setSaveState('idle');
+    setSaveErrorMessage(null);
+    setValidationMessage(null);
   };
 
   const handleChartChange = (updates: ChartEditorUpdates) => {
@@ -267,8 +293,14 @@ export function SongEditorScreen({ navigation, route }: Props) {
       }
 
       if (updates.bars) {
-        const nextBars = updates.bars;
         const nextStringNames = updates.stringNames ?? current.stringNames;
+        const nextBars = updates.bars.map((bar) =>
+          normalizeBarForEditor(
+            bar,
+            nextStringNames,
+            updates.defaultBeatCount ?? chart?.defaultBeatCount ?? current.rows[0]?.defaultBeatCount ?? DEFAULT_BEAT_COUNT,
+          ),
+        );
         const fallbackRowBarCounts = current.rows.map((row) => row.bars.length);
         const nextRowBarCounts = normalizeRowBarCounts(
           nextBars.length,
@@ -407,6 +439,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
       };
     });
     setSaveState('idle');
+    setSaveErrorMessage(null);
+    setValidationMessage(null);
   };
 
   const handleDefaultBeatCountSelect = (value: number) => {
@@ -437,20 +471,34 @@ export function SongEditorScreen({ navigation, route }: Props) {
           afterText: '',
           defaultBeatCount: configBeatCount,
           bars: Array.from({ length: 4 }, () => ({
+            id: createId('bar'),
+            type: 'PLAYABLE' as const,
             beatCount: configBeatCount,
             cells: Object.fromEntries(
               current.stringNames.map((name) => [name, Array.from({ length: slotsPerBar }, () => '-')]),
             ),
+            events: [],
             note: '',
           })),
         }],
       };
     });
     setSaveState('idle');
+    setSaveErrorMessage(null);
+    setValidationMessage(null);
   };
 
   const handleSave = () => {
     if (!editorSong) {
+      return;
+    }
+
+    const issues = editorSong.rows.flatMap((row) => row.bars).flatMap((bar, barIndex) => validateBar(bar, barIndex));
+    if (issues.length > 0) {
+      const firstIssue = issues[0];
+      setSaveErrorMessage(`Bar ${firstIssue.barIndex + 1}: ${firstIssue.message}`);
+      setValidationMessage(`Bar ${firstIssue.barIndex + 1}: ${firstIssue.message}`);
+      setSaveState('idle');
       return;
     }
 
@@ -480,6 +528,8 @@ export function SongEditorScreen({ navigation, route }: Props) {
     baselineRef.current = serializeSongDraft(editorSong);
     setHasSavedOnce(true);
     setSaveState('saved');
+    setSaveErrorMessage(null);
+    setValidationMessage(null);
 
     if (saveResetTimerRef.current) {
       clearTimeout(saveResetTimerRef.current);
@@ -495,7 +545,6 @@ export function SongEditorScreen({ navigation, route }: Props) {
   };
 
   const saveButtonLabel = !hasSavedOnce ? 'Create Song' : 'Save Changes';
-
   const saveStateText =
     saveState === 'saving'
       ? 'Saving changes...'
@@ -537,7 +586,7 @@ export function SongEditorScreen({ navigation, route }: Props) {
           key={chart.id}
           section={chart}
           stringNamesOverride={editorSong.stringNames}
-          barsOverride={editorSong.rows.flatMap((row) => row.bars)}
+          barsOverride={flattenedEditorBars}
           index={0}
           isFirst
           isLast
@@ -758,6 +807,9 @@ export function SongEditorScreen({ navigation, route }: Props) {
       <View style={styles.saveDock}>
         <View style={styles.saveDockCopy}>
           <Text style={styles.saveDockTitle}>{saveStateText}</Text>
+          {saveErrorMessage || validationMessage ? (
+            <Text style={styles.saveDockError}>{saveErrorMessage ?? validationMessage}</Text>
+          ) : null}
           <Text style={styles.saveDockSubtitle}>
             {isDirty
               ? 'Save now to lock this version in.'
@@ -1086,5 +1138,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: palette.textMuted,
+  },
+  saveDockError: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#ef4444',
   },
 });
