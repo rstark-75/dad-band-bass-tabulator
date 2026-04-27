@@ -4,7 +4,8 @@
   "main": "index.ts",
   "scripts": {
     "build": "expo export --platform web",
-    "start": "expo start",
+    "start": "npx serve dist -s -l tcp://0.0.0.0:${PORT:-3000}",
+    "dev": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
